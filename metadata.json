@@ -1,0 +1,6 @@
+{
+  "name": "Gestionnaire de Tâches Mobile",
+  "description": "Application mobile moderne, intuitive et complète pour organiser vos tâches quotidiennes, projets et sous-tâches.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
