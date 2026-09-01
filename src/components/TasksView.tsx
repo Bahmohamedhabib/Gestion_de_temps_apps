@@ -12,13 +12,14 @@ import {
   CheckCircle,
   Inbox,
 } from 'lucide-react';
-import { Task, CategoryId, FilterStatus, SortOption } from '../types';
+import { Task, CategoryId, FilterStatus, SortOption, User } from '../types';
 import { CATEGORIES, getTodayDateString } from '../data/defaultTasks';
 import { TaskCard } from './TaskCard';
 import { CategoryIcon } from './CategoryIcon';
 
 interface Props {
   tasks: Task[];
+  currentUser?: User;
   onToggleComplete: (id: string) => void;
   onOpenTaskDetail: (task: Task) => void;
   onEditTask: (task: Task) => void;
@@ -28,6 +29,7 @@ interface Props {
 
 export const TasksView: React.FC<Props> = ({
   tasks,
+  currentUser,
   onToggleComplete,
   onOpenTaskDetail,
   onEditTask,
@@ -111,7 +113,7 @@ export const TasksView: React.FC<Props> = ({
               Aujourd'hui
             </span>
             <h2 className="text-xl font-bold tracking-tight mt-0.5">
-              Bonjour ! 👋
+              Bonjour {currentUser?.name ? currentUser.name.split(' ')[0] : ''} ! 👋
             </h2>
             <p className="text-xs text-indigo-100/90 mt-1 max-w-[200px]">
               {todayTotal === 0

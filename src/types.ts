@@ -18,6 +18,7 @@ export interface SubTask {
 
 export interface Task {
   id: string;
+  userId?: string;
   title: string;
   description?: string;
   completed: boolean;
@@ -29,6 +30,7 @@ export interface Task {
   createdAt: string;
   completedAt?: string;
   reminder?: boolean;
+  reminderMinutesBefore?: number; // e.g. 0, 15, 30, 60
 }
 
 export type TabType = 'tasks' | 'calendar' | 'stats' | 'settings';
@@ -36,3 +38,35 @@ export type TabType = 'tasks' | 'calendar' | 'stats' | 'settings';
 export type FilterStatus = 'all' | 'today' | 'upcoming' | 'completed' | 'overdue';
 
 export type SortOption = 'dueDate' | 'priority' | 'title' | 'createdAt';
+
+export interface UserSettings {
+  enableAudioAlerts: boolean;
+  enableBrowserNotifications: boolean;
+  defaultReminderMinutes: number; // 0 (exact time), 15, 30, 60
+  soundTheme: 'gentle' | 'chime' | 'digital';
+}
+
+export interface User {
+  id: string;
+  name: string;
+  email: string;
+  password?: string;
+  avatarColor: string;
+  role?: string;
+  createdAt: string;
+  settings: UserSettings;
+}
+
+export type NotificationType = 'created' | 'reminder' | 'due' | 'completed' | 'info';
+
+export interface AppNotification {
+  id: string;
+  userId: string;
+  taskId?: string;
+  taskTitle?: string;
+  title: string;
+  message: string;
+  type: NotificationType;
+  timestamp: string;
+  read: boolean;
+}
