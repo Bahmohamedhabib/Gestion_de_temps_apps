@@ -12,10 +12,10 @@ import {
   Bell,
   Volume2,
   VolumeX,
-  Users,
   Play,
   Check,
   AlertCircle,
+  LogOut,
 } from 'lucide-react';
 import { Task, User, UserSettings } from '../types';
 import { soundManager } from '../utils/audio';
@@ -28,8 +28,8 @@ interface Props {
   onClearCompleted: () => void;
   onImportTasks: (tasks: Task[]) => void;
   onOpenInstallModal: () => void;
-  onOpenAuthModal: () => void;
   onUpdateUserSettings: (settings: Partial<UserSettings>) => void;
+  onLogout: () => void;
 }
 
 export const SettingsView: React.FC<Props> = ({
@@ -39,8 +39,8 @@ export const SettingsView: React.FC<Props> = ({
   onClearCompleted,
   onImportTasks,
   onOpenInstallModal,
-  onOpenAuthModal,
   onUpdateUserSettings,
+  onLogout,
 }) => {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [successMessage, setSuccessMessage] = useState('');
@@ -59,11 +59,11 @@ export const SettingsView: React.FC<Props> = ({
     const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(tasks, null, 2));
     const downloadAnchor = document.createElement('a');
     downloadAnchor.setAttribute('href', dataStr);
-    downloadAnchor.setAttribute('download', `taches_${currentUser.name.toLowerCase().replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`);
+    downloadAnchor.setAttribute('download', `mes_taches_${currentUser.name.toLowerCase().replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`);
     document.body.appendChild(downloadAnchor);
     downloadAnchor.click();
     downloadAnchor.remove();
-    showFeedback('Exportation réussie en JSON !');
+    showFeedback('Exportation réussie de vos données en JSON !');
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -75,7 +75,7 @@ export const SettingsView: React.FC<Props> = ({
           const parsed = JSON.parse(event.target?.result as string);
           if (Array.isArray(parsed)) {
             onImportTasks(parsed);
-            showFeedback('Tâches importées avec succès !');
+            showFeedback('Vos tâches ont été importées avec succès !');
           } else {
             alert('Format de fichier invalide (doit être un tableau de tâches).');
           }
@@ -91,11 +91,11 @@ export const SettingsView: React.FC<Props> = ({
     setPermissionStatus(res);
     if (res === 'granted') {
       onUpdateUserSettings({ enableBrowserNotifications: true });
-      sendBrowserNotification('Notifications activées ! 🎉', {
-        body: 'Vous recevrez désormais des rappels à l\'approche de vos tâches.',
+      sendBrowserNotification('Notifications activées ! 🔔', {
+        body: 'Vous recevrez des rappels sonores à l\'approche de vos échéances.',
       });
       soundManager.playReminderChime();
-      showFeedback('Notifications système autorisées et testées !');
+      showFeedback('Notifications système et sonores autorisées !');
     } else {
       showFeedback('Autorisation de notification refusée dans le navigateur.');
     }
@@ -109,9 +109,9 @@ export const SettingsView: React.FC<Props> = ({
   };
 
   return (
-    <div className="space-y-4 pb-20">
+    <div className="space-y-4 pb-24">
       {/* Top Banner */}
-      <div className="bg-white rounded-3xl p-5 border border-neutral-200/90 shadow-sm">
+      <div className="bg-white rounded-3xl p-5 border border-neutral-200/90 shadow-xs">
         <span className="text-[11px] font-bold uppercase tracking-wider text-indigo-600">
           Configuration
         </span>
@@ -119,7 +119,7 @@ export const SettingsView: React.FC<Props> = ({
           Paramètres & Compte
         </h2>
         <p className="text-xs text-neutral-500 mt-1">
-          Gérez vos préférences de rappels, alertes et votre espace privé.
+          Gérez vos préférences de rappels, notifications d'arrière-plan et votre espace privé.
         </p>
 
         {successMessage && (
@@ -131,7 +131,7 @@ export const SettingsView: React.FC<Props> = ({
       </div>
 
       {/* Current User Card */}
-      <div className="bg-white rounded-3xl p-5 border border-neutral-200/90 shadow-sm space-y-3">
+      <div className="bg-white rounded-3xl p-5 border border-neutral-200/90 shadow-xs space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div
@@ -149,229 +149,200 @@ export const SettingsView: React.FC<Props> = ({
                 <h3 className="text-sm font-bold text-neutral-900">
                   {currentUser.name}
                 </h3>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-700">
-                  Connecté
+                <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-md">
+                  Privé
                 </span>
               </div>
               <p className="text-xs text-neutral-500">{currentUser.email}</p>
-              {currentUser.role && (
-                <p className="text-[10px] text-indigo-600 font-medium">{currentUser.role}</p>
-              )}
             </div>
           </div>
-        </div>
 
-        <button
-          onClick={onOpenAuthModal}
-          className="w-full py-2.5 px-4 bg-indigo-50 hover:bg-indigo-100 active:scale-[0.99] text-indigo-700 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border border-indigo-100"
-        >
-          <Users size={15} />
-          <span>Changer d'utilisateur / Créer un nouveau compte</span>
-        </button>
+          <button
+            onClick={onLogout}
+            className="p-2 text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
+            title="Se déconnecter"
+          >
+            <LogOut size={18} />
+          </button>
+        </div>
       </div>
 
-      {/* Notifications & Reminders Preferences */}
-      <div className="bg-white rounded-3xl p-5 border border-neutral-200/90 shadow-sm space-y-4">
-        <h3 className="text-sm font-bold text-neutral-900 flex items-center gap-2">
-          <Bell size={16} className="text-amber-500" />
-          <span>Rappels & Alertes Sonores</span>
-        </h3>
+      {/* Notifications and Audio Settings Section */}
+      <div className="bg-white rounded-3xl p-5 border border-neutral-200/90 shadow-xs space-y-4">
+        <div className="flex items-center gap-2">
+          <Bell size={18} className="text-indigo-600" />
+          <h3 className="text-sm font-bold text-neutral-900">
+            Alertes & Notifications d'arrière-plan
+          </h3>
+        </div>
 
-        {/* Audio Alerts Toggle */}
-        <div className="flex items-center justify-between py-1">
-          <div>
-            <div className="text-xs font-bold text-neutral-800 flex items-center gap-1.5">
-              <Volume2 size={14} className="text-indigo-600" />
-              <span>Sons & Carillons intégrés</span>
-            </div>
-            <p className="text-[11px] text-neutral-500">
-              Joue un carillon lors de la création et des rappels
-            </p>
+        {/* Browser Permission Prompt */}
+        <div className="p-4 rounded-2xl bg-neutral-50 border border-neutral-200/80 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-neutral-800">
+              Autorisation des alertes du système
+            </span>
+            <span
+              className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${
+                permissionStatus === 'granted'
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : 'bg-amber-100 text-amber-700'
+              }`}
+            >
+              {permissionStatus === 'granted' ? 'Autorisé' : 'Non activé'}
+            </span>
           </div>
-          <label className="relative inline-flex items-center cursor-pointer">
+          <p className="text-[11px] text-neutral-500">
+            Permet de faire sonner et d'afficher les alertes même quand l'application est réduite ou fermée.
+          </p>
+          <button
+            onClick={handleRequestPermission}
+            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer flex items-center justify-center gap-2"
+          >
+            <Bell size={14} />
+            <span>
+              {permissionStatus === 'granted' ? 'Tester la notification et le son' : 'Activer les notifications'}
+            </span>
+          </button>
+        </div>
+
+        {/* Toggle Controls */}
+        <div className="space-y-3 pt-1">
+          {/* Audio Chimes Toggle */}
+          <label className="flex items-center justify-between cursor-pointer">
+            <div className="flex items-center gap-2.5">
+              <Volume2 size={16} className="text-neutral-500" />
+              <div>
+                <span className="text-xs font-bold text-neutral-800 block">
+                  Sons et carillons d'alerte
+                </span>
+                <span className="text-[11px] text-neutral-500 block">
+                  Jouer un son à la création, au rappel et à l'échéance
+                </span>
+              </div>
+            </div>
             <input
               type="checkbox"
               checked={currentUser.settings?.enableAudioAlerts ?? true}
               onChange={(e) =>
                 onUpdateUserSettings({ enableAudioAlerts: e.target.checked })
               }
-              className="sr-only peer"
+              className="w-4 h-4 text-indigo-600 rounded-md focus:ring-indigo-500 cursor-pointer"
             />
-            <div className="w-9 h-5 bg-neutral-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-neutral-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-indigo-600" />
           </label>
-        </div>
 
-        {/* Audio Test buttons */}
-        <div className="bg-neutral-50 p-3 rounded-2xl border border-neutral-200/80 space-y-2">
-          <span className="text-[11px] font-bold text-neutral-700 block">
-            Tester les sons d'alerte :
-          </span>
-          <div className="grid grid-cols-2 gap-1.5">
-            <button
-              onClick={() => handleTestSound('creation')}
-              className="py-1.5 px-2.5 bg-white hover:bg-neutral-100 border border-neutral-200 rounded-lg text-[11px] font-medium text-neutral-700 flex items-center justify-center gap-1 cursor-pointer"
-            >
-              <Play size={11} className="text-indigo-600" />
-              <span>Création tâche</span>
-            </button>
-            <button
-              onClick={() => handleTestSound('reminder')}
-              className="py-1.5 px-2.5 bg-white hover:bg-neutral-100 border border-neutral-200 rounded-lg text-[11px] font-medium text-neutral-700 flex items-center justify-center gap-1 cursor-pointer"
-            >
-              <Play size={11} className="text-amber-500" />
-              <span>Rappel approche</span>
-            </button>
-            <button
-              onClick={() => handleTestSound('due')}
-              className="py-1.5 px-2.5 bg-white hover:bg-neutral-100 border border-neutral-200 rounded-lg text-[11px] font-medium text-neutral-700 flex items-center justify-center gap-1 cursor-pointer"
-            >
-              <Play size={11} className="text-red-500" />
-              <span>Échéance atteinte</span>
-            </button>
-            <button
-              onClick={() => handleTestSound('complete')}
-              className="py-1.5 px-2.5 bg-white hover:bg-neutral-100 border border-neutral-200 rounded-lg text-[11px] font-medium text-neutral-700 flex items-center justify-center gap-1 cursor-pointer"
-            >
-              <Play size={11} className="text-emerald-500" />
-              <span>Tâche finie</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Default Reminder Lead time */}
-        <div>
-          <label className="block text-xs font-bold text-neutral-800 mb-1">
-            Délai de rappel par défaut à l'approche
-          </label>
-          <select
-            value={currentUser.settings?.defaultReminderMinutes ?? 15}
-            onChange={(e) =>
-              onUpdateUserSettings({ defaultReminderMinutes: Number(e.target.value) })
-            }
-            className="w-full px-3 py-2 bg-neutral-50 border border-neutral-200 rounded-xl text-xs text-neutral-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          >
-            <option value={0}>À l'heure exacte (0 min avant)</option>
-            <option value={5}>5 minutes avant l'échéance</option>
-            <option value={15}>15 minutes avant l'échéance</option>
-            <option value={30}>30 minutes avant l'échéance</option>
-            <option value={60}>1 heure avant l'échéance</option>
-          </select>
-        </div>
-
-        {/* Browser Notifications Permission */}
-        <div className="pt-2 border-t border-neutral-100">
-          <div className="flex items-center justify-between">
-            <div>
-              <span className="text-xs font-bold text-neutral-800 block">
-                Notifications système (Bureau & Mobile)
-              </span>
-              <span className="text-[11px] text-neutral-500">
-                Statut actuel :{' '}
-                <strong className={permissionStatus === 'granted' ? 'text-emerald-600' : 'text-amber-600'}>
-                  {permissionStatus === 'granted' ? 'Autorisé' : 'Non activé'}
-                </strong>
-              </span>
+          {/* Sound Testing Suite */}
+          <div className="p-3 bg-indigo-50/50 rounded-2xl border border-indigo-100 space-y-2">
+            <span className="text-[11px] font-bold text-indigo-900 block">
+              Tester les mélodies sonores :
+            </span>
+            <div className="grid grid-cols-2 gap-1.5">
+              <button
+                type="button"
+                onClick={() => handleTestSound('creation')}
+                className="px-2.5 py-1.5 bg-white hover:bg-neutral-50 border border-indigo-200 text-indigo-800 rounded-xl text-[11px] font-medium flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <Play size={11} />
+                <span>Création</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTestSound('reminder')}
+                className="px-2.5 py-1.5 bg-white hover:bg-neutral-50 border border-indigo-200 text-indigo-800 rounded-xl text-[11px] font-medium flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <Play size={11} />
+                <span>Rappel</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTestSound('due')}
+                className="px-2.5 py-1.5 bg-white hover:bg-neutral-50 border border-indigo-200 text-indigo-800 rounded-xl text-[11px] font-medium flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <Play size={11} />
+                <span>Alarme</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTestSound('complete')}
+                className="px-2.5 py-1.5 bg-white hover:bg-neutral-50 border border-indigo-200 text-indigo-800 rounded-xl text-[11px] font-medium flex items-center justify-center gap-1 cursor-pointer"
+              >
+                <Play size={11} />
+                <span>Succès</span>
+              </button>
             </div>
-            <button
-              onClick={handleRequestPermission}
-              className="py-1.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-all cursor-pointer shadow-2xs"
-            >
-              {permissionStatus === 'granted' ? 'Tester l\'alerte' : 'Autoriser'}
-            </button>
           </div>
         </div>
       </div>
 
-      {/* Mobile App Installation Banner */}
-      <div className="bg-gradient-to-br from-indigo-50 to-violet-50 rounded-3xl p-5 border border-indigo-100 shadow-sm space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-2 bg-indigo-600 text-white rounded-xl">
-              <Smartphone size={18} />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-indigo-950">
-                Installer sur votre téléphone
-              </h3>
-              <p className="text-[11px] text-indigo-700">
-                PWA plein écran sans téléchargement sur Store
-              </p>
-            </div>
-          </div>
+      {/* Mobile PWA Installation */}
+      <div className="bg-gradient-to-br from-indigo-900 via-indigo-950 to-neutral-900 text-white rounded-3xl p-5 shadow-sm space-y-3">
+        <div className="flex items-center gap-2">
+          <Smartphone size={18} className="text-indigo-400" />
+          <h3 className="text-sm font-bold">Installer comme Application Mobile</h3>
         </div>
+        <p className="text-xs text-neutral-300 leading-relaxed">
+          Ajoutez cette application à l'écran d'accueil de votre téléphone (iOS ou Android) pour un accès instantané et des alertes hors-ligne.
+        </p>
         <button
           onClick={onOpenInstallModal}
-          className="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-700 active:scale-[0.99] text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center justify-center gap-2 cursor-pointer"
+          className="w-full py-2.5 bg-white text-neutral-900 hover:bg-neutral-100 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
         >
-          <Smartphone size={14} />
-          <span>Voir le guide d'installation mobile</span>
+          <Smartphone size={14} className="text-indigo-600" />
+          <span>Voir les instructions d'installation mobile</span>
         </button>
       </div>
 
-      {/* Data Management Card */}
-      <div className="bg-white rounded-3xl p-5 border border-neutral-200/90 shadow-sm space-y-3">
-        <h3 className="text-sm font-bold text-neutral-900 flex items-center gap-2">
-          <ShieldCheck size={16} className="text-indigo-600" />
-          <span>Données & Sauvegarde de l'espace</span>
+      {/* Data Management Section */}
+      <div className="bg-white rounded-3xl p-5 border border-neutral-200/90 shadow-xs space-y-4">
+        <h3 className="text-sm font-bold text-neutral-900">
+          Gestion des données & Sauvegardes
         </h3>
 
-        <p className="text-xs text-neutral-500">
-          Vos données sont enregistrées en toute sécurité dans l'espace de votre compte.
-        </p>
-
-        <div className="grid grid-cols-2 gap-2 pt-1">
+        <div className="space-y-2">
           <button
             onClick={handleExport}
-            className="py-2.5 px-3 bg-neutral-50 hover:bg-neutral-100 active:scale-[0.99] border border-neutral-200 text-neutral-800 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer"
+            className="w-full py-2.5 px-4 rounded-2xl bg-neutral-50 hover:bg-neutral-100 text-neutral-700 text-xs font-bold flex items-center justify-between border border-neutral-200/80 cursor-pointer transition-colors"
           >
-            <Download size={14} />
-            <span>Exporter mes tâches</span>
+            <div className="flex items-center gap-2.5">
+              <Download size={16} className="text-neutral-500" />
+              <span>Exporter mes tâches (JSON)</span>
+            </div>
+            <span className="text-[10px] text-neutral-400 font-mono">
+              {tasks.length} tâches
+            </span>
           </button>
 
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="py-2.5 px-3 bg-neutral-50 hover:bg-neutral-100 active:scale-[0.99] border border-neutral-200 text-neutral-800 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-all cursor-pointer"
+            className="w-full py-2.5 px-4 rounded-2xl bg-neutral-50 hover:bg-neutral-100 text-neutral-700 text-xs font-bold flex items-center justify-between border border-neutral-200/80 cursor-pointer transition-colors"
           >
-            <Upload size={14} />
-            <span>Importer JSON</span>
+            <div className="flex items-center gap-2.5">
+              <Upload size={16} className="text-neutral-500" />
+              <span>Importer des tâches (JSON)</span>
+            </div>
           </button>
           <input
-            type="file"
             ref={fileInputRef}
-            onChange={handleFileChange}
+            type="file"
             accept=".json"
+            onChange={handleFileChange}
             className="hidden"
           />
-        </div>
 
-        <div className="pt-2 border-t border-neutral-100 space-y-2">
           {completedCount > 0 && (
             <button
-              onClick={() => {
-                if (window.confirm(`Supprimer les ${completedCount} tâche(s) terminée(s) de votre compte ?`)) {
-                  onClearCompleted();
-                  showFeedback('Tâches terminées supprimées.');
-                }
-              }}
-              className="w-full py-2.5 px-3 bg-neutral-50 hover:bg-amber-50 text-neutral-700 hover:text-amber-700 border border-neutral-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              onClick={onClearCompleted}
+              className="w-full py-2.5 px-4 rounded-2xl bg-neutral-50 hover:bg-neutral-100 text-neutral-700 text-xs font-bold flex items-center justify-between border border-neutral-200/80 cursor-pointer transition-colors"
             >
-              <Trash2 size={14} />
-              <span>Nettoyer les tâches terminées ({completedCount})</span>
+              <div className="flex items-center gap-2.5">
+                <Trash2 size={16} className="text-rose-500" />
+                <span>Supprimer les tâches terminées</span>
+              </div>
+              <span className="text-[10px] text-rose-500 font-mono font-bold">
+                {completedCount} terminées
+              </span>
             </button>
           )}
-
-          <button
-            onClick={() => {
-              if (window.confirm('Voulez-vous réinitialiser les tâches avec les données de démonstration de votre profil ?')) {
-                onResetTasks();
-                showFeedback('Tâches réinitialisées.');
-              }
-            }}
-            className="w-full py-2.5 px-3 bg-neutral-50 hover:bg-rose-50 text-neutral-700 hover:text-rose-700 border border-neutral-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
-          >
-            <RotateCcw size={14} />
-            <span>Réinitialiser les tâches démo</span>
-          </button>
         </div>
       </div>
     </div>

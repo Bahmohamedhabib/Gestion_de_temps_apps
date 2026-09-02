@@ -19,6 +19,13 @@ export function formatFullFrenchDate(date: Date): string {
   });
 }
 
+export function formatMonthYear(date: Date): string {
+  return date.toLocaleDateString('fr-FR', {
+    month: 'long',
+    year: 'numeric',
+  });
+}
+
 export function getRelativeDateBadge(dueDateStr: string, isCompleted: boolean): { text: string; status: 'overdue' | 'today' | 'tomorrow' | 'upcoming' } {
   if (!dueDateStr) return { text: 'Sans date', status: 'upcoming' };
   
@@ -45,6 +52,7 @@ export function getRelativeDateBadge(dueDateStr: string, isCompleted: boolean): 
   }
 }
 
+// 7 days of the specified week (Monday to Sunday)
 export function getDaysOfWeek(centerDate: Date = new Date()): Array<{ date: Date; dateStr: string; dayName: string; dayNumber: number; isToday: boolean }> {
   const result = [];
   const curr = new Date(centerDate);
@@ -70,4 +78,49 @@ export function getDaysOfWeek(centerDate: Date = new Date()): Array<{ date: Date
     });
   }
   return result;
+}
+
+export interface MonthDayInfo {
+  date: Date;
+  dateStr: string;
+  dayNumber: number;
+  isCurrentMonth: boolean;
+  isToday: boolean;
+  dayOfWeek: number; // 0 = Sunday, 1 = Monday, etc.
+}
+
+// Full 42-day matrix for a month calendar grid starting on Monday
+export function getMonthMatrix(year: number, monthIndex: number): MonthDayInfo[] {
+  const todayStr = new Date().toISOString().split('T')[0];
+  const firstDayOfMonth = new Date(year, monthIndex, 1);
+  
+  // Day of week for 1st of month: 0 (Sun) to 6 (Sat)
+  const firstDayWeekday = firstDayOfMonth.getDay();
+  // Monday is 1, Sunday is 7 in EU
+  const offset = firstDayWeekday === 0 ? 6 : firstDayWeekday - 1;
+
+  const startDate = new Date(year, monthIndex, 1 - offset);
+  const days: MonthDayInfo[] = [];
+
+  for (let i = 0; i < 42; i++) {
+    const current = new Date(startDate);
+    current.setDate(startDate.getDate() + i);
+    
+    // Format YYYY-MM-DD
+    const y = current.getFullYear();
+    const m = String(current.getMonth() + 1).padStart(2, '0');
+    const d = String(current.getDate()).padStart(2, '0');
+    const dateStr = `${y}-${m}-${d}`;
+
+    days.push({
+      date: current,
+      dateStr,
+      dayNumber: current.getDate(),
+      isCurrentMonth: current.getMonth() === monthIndex,
+      isToday: dateStr === todayStr,
+      dayOfWeek: current.getDay(),
+    });
+  }
+
+  return days;
 }

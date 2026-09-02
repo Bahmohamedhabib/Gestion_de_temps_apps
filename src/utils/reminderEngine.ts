@@ -2,6 +2,23 @@ import { Task, User, AppNotification } from '../types';
 import { soundManager } from './audio';
 import { authStorage } from './authStorage';
 
+let swRegistration: ServiceWorkerRegistration | null = null;
+
+// Initialize and register service worker on app start
+export async function initServiceWorker(): Promise<ServiceWorkerRegistration | null> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) {
+    return null;
+  }
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    swRegistration = reg;
+    return reg;
+  } catch (e) {
+    console.warn('Service Worker registration skipped or failed', e);
+    return null;
+  }
+}
+
 // Request browser notification permission
 export async function requestNotificationPermission(): Promise<NotificationPermission> {
   if (typeof window === 'undefined' || !('Notification' in window)) {
@@ -9,6 +26,11 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
   }
   try {
     const permission = await Notification.requestPermission();
+    if (permission === 'granted' && 'serviceWorker' in navigator) {
+      if (!swRegistration) {
+        swRegistration = await initServiceWorker();
+      }
+    }
     return permission;
   } catch (e) {
     console.warn('Error requesting notification permission', e);
@@ -16,18 +38,53 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
   }
 }
 
-// Send system notification
-export function sendBrowserNotification(title: string, options?: NotificationOptions) {
+// Send system notification (works in background through Service Worker or native Web Notification API)
+export function sendBrowserNotification(title: string, options?: NotificationOptions & { taskId?: string }) {
   if (typeof window === 'undefined' || !('Notification' in window)) return;
+  
   if (Notification.permission === 'granted') {
+    // Vibrate device if supported (haptic feedback)
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate([300, 150, 300, 150, 400]);
+      } catch (e) {
+        // ignore
+      }
+    }
+
+    const notifOptions: NotificationOptions & Record<string, unknown> = {
+      icon: '/favicon.ico',
+      badge: '/favicon.ico',
+      tag: options?.tag || 'task-alert',
+      requireInteraction: true, // Remains on screen until dismissed
+      renotify: true,
+      data: {
+        taskId: options?.taskId,
+      },
+      ...options,
+    };
+
+    // Try service worker registration first for background persistence
+    if (swRegistration && 'showNotification' in swRegistration) {
+      try {
+        swRegistration.showNotification(title, notifOptions);
+        return;
+      } catch (e) {
+        console.warn('SW notification fallback to window Notification', e);
+      }
+    }
+
+    // Direct Notification constructor fallback
     try {
-      new Notification(title, {
-        icon: '/favicon.ico',
-        badge: '/favicon.ico',
-        ...options,
-      });
+      const notif = new Notification(title, notifOptions);
+      if (options?.taskId) {
+        notif.onclick = () => {
+          window.focus();
+          notif.close();
+        };
+      }
     } catch (e) {
-      console.warn('Failed to dispatch browser notification', e);
+      console.warn('Failed to dispatch standard browser notification', e);
     }
   }
 }
@@ -38,7 +95,7 @@ export function checkTaskReminders(
   user: User,
   onAlertTriggered?: (alert: AppNotification) => void
 ) {
-  if (!tasks || tasks.length === 0) return;
+  if (!tasks || tasks.length === 0 || !user) return;
 
   const now = new Date();
   const todayStr = now.toISOString().split('T')[0];
@@ -61,7 +118,7 @@ export function checkTaskReminders(
     // Difference in minutes
     const diffMinutes = Math.round((taskMs - nowMs) / (1000 * 60));
 
-    const reminderLead = task.reminderMinutesBefore ?? user.settings.defaultReminderMinutes ?? 15;
+    const reminderLead = task.reminderMinutesBefore ?? user.settings?.defaultReminderMinutes ?? 15;
 
     // 1. Approaching Reminder (e.g., exactly at reminderLead minutes, between [reminderLead - 2, reminderLead + 1])
     if (reminderLead > 0 && diffMinutes > 0 && diffMinutes <= reminderLead) {
@@ -69,17 +126,18 @@ export function checkTaskReminders(
       if (!sessionStorage.getItem(alertedKey)) {
         sessionStorage.setItem(alertedKey, 'true');
 
-        const title = `⏰ Rappel dans ${diffMinutes} min`;
+        const title = `⏰ Rappel : Dans ${diffMinutes} min`;
         const message = `« ${task.title} » arrive à échéance à ${task.dueTime} !`;
 
-        if (user.settings.enableAudioAlerts) {
+        if (user.settings?.enableAudioAlerts) {
           soundManager.playReminderChime();
         }
 
-        if (user.settings.enableBrowserNotifications) {
+        if (user.settings?.enableBrowserNotifications) {
           sendBrowserNotification(title, {
             body: message,
             tag: `reminder-${task.id}`,
+            taskId: task.id,
           });
         }
 
@@ -106,14 +164,15 @@ export function checkTaskReminders(
         const title = `🚨 C'est l'heure de votre tâche !`;
         const message = `« ${task.title} » est programmée pour maintenant (${task.dueTime}).`;
 
-        if (user.settings.enableAudioAlerts) {
+        if (user.settings?.enableAudioAlerts) {
           soundManager.playDueChime();
         }
 
-        if (user.settings.enableBrowserNotifications) {
+        if (user.settings?.enableBrowserNotifications) {
           sendBrowserNotification(title, {
             body: message,
             tag: `due-${task.id}`,
+            taskId: task.id,
           });
         }
 

@@ -9,7 +9,11 @@ import { Task, TabType, User, AppNotification, UserSettings } from './types';
 import { getTodayDateString } from './data/defaultTasks';
 import { authStorage } from './utils/authStorage';
 import { soundManager } from './utils/audio';
-import { checkTaskReminders, sendBrowserNotification } from './utils/reminderEngine';
+import {
+  checkTaskReminders,
+  sendBrowserNotification,
+  initServiceWorker,
+} from './utils/reminderEngine';
 
 // Components
 import { StatusBar } from './components/StatusBar';
@@ -22,22 +26,26 @@ import { SettingsView } from './components/SettingsView';
 import { TaskModal } from './components/TaskModal';
 import { TaskDetailModal } from './components/TaskDetailModal';
 import { InstallPwaModal } from './components/InstallPwaModal';
-import { AuthModal } from './components/AuthModal';
 import { UserMenuModal } from './components/UserMenuModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
 import { NotificationBanner } from './components/NotificationBanner';
+import { AuthScreen } from './components/AuthScreen';
 
 export default function App() {
-  // Current user state
-  const [currentUser, setCurrentUser] = useState<User>(() => authStorage.getCurrentUser());
+  // Current user state (strictly private account)
+  const [currentUser, setCurrentUser] = useState<User | null>(() => authStorage.getCurrentUser());
 
   // User-specific tasks state
-  const [tasks, setTasks] = useState<Task[]>(() => authStorage.getUserTasks(currentUser.id));
+  const [tasks, setTasks] = useState<Task[]>(() => {
+    const user = authStorage.getCurrentUser();
+    return user ? authStorage.getUserTasks(user.id) : [];
+  });
 
   // User-specific notifications state
-  const [notifications, setNotifications] = useState<AppNotification[]>(() =>
-    authStorage.getUserNotifications(currentUser.id)
-  );
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+    const user = authStorage.getCurrentUser();
+    return user ? authStorage.getUserNotifications(user.id) : [];
+  });
 
   // Active floating alert banner
   const [activeAlert, setActiveAlert] = useState<AppNotification | null>(null);
@@ -46,12 +54,16 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<TabType>('tasks');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isNotifsDrawerOpen, setIsNotifsDrawerOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [selectedDetailTask, setSelectedDetailTask] = useState<Task | null>(null);
   const [isDeviceFrameMode, setIsDeviceFrameMode] = useState(true);
+
+  // Initialize service worker for background notifications
+  useEffect(() => {
+    initServiceWorker();
+  }, []);
 
   // Save tasks to user storage whenever they change
   useEffect(() => {
@@ -60,19 +72,29 @@ export default function App() {
     }
   }, [tasks, currentUser?.id]);
 
-  // Handle switching user
-  const handleUserChanged = (newUser: User) => {
-    setCurrentUser(newUser);
-    const newTasks = authStorage.getUserTasks(newUser.id);
-    const newNotifs = authStorage.getUserNotifications(newUser.id);
-    setTasks(newTasks);
-    setNotifications(newNotifs);
-    setSelectedDetailTask(null);
-    setEditingTask(null);
+  // Handle user authentication (Login or Register)
+  const handleUserAuthenticated = (user: User) => {
+    setCurrentUser(user);
+    const userTasks = authStorage.getUserTasks(user.id);
+    const userNotifs = authStorage.getUserNotifications(user.id);
+    setTasks(userTasks);
+    setNotifications(userNotifs);
+    setActiveTab('tasks');
+  };
+
+  // Handle user logout
+  const handleLogout = () => {
+    authStorage.logout();
+    setCurrentUser(null);
+    setTasks([]);
+    setNotifications([]);
+    setIsUserMenuOpen(false);
+    setIsNotifsDrawerOpen(false);
   };
 
   // Update user profile or settings
   const handleUpdateUserSettings = (newSettings: Partial<UserSettings>) => {
+    if (!currentUser) return;
     const updated = authStorage.updateUserProfile(currentUser.id, {
       settings: {
         ...currentUser.settings,
@@ -96,8 +118,10 @@ export default function App() {
     }
   }, [tasks]);
 
-  // Deadline reminder checker interval (every 10 seconds)
+  // Deadline reminder checker interval (every 8 seconds)
   useEffect(() => {
+    if (!currentUser) return;
+
     const runChecker = () => {
       checkTaskReminders(tasks, currentUser, (newAlert) => {
         setNotifications((prev) => [newAlert, ...prev]);
@@ -106,18 +130,20 @@ export default function App() {
     };
 
     runChecker();
-    const interval = setInterval(runChecker, 10000);
+    const interval = setInterval(runChecker, 8000);
     return () => clearInterval(interval);
   }, [tasks, currentUser]);
 
   // Handlers for tasks
   const handleToggleComplete = (taskId: string) => {
+    if (!currentUser) return;
+
     setTasks((prev) =>
       prev.map((t) => {
         if (t.id === taskId) {
           const willBeCompleted = !t.completed;
           if (willBeCompleted) {
-            if (currentUser.settings.enableAudioAlerts) {
+            if (currentUser.settings?.enableAudioAlerts) {
               soundManager.playCompletionChime();
             }
             // Add notification
@@ -172,6 +198,8 @@ export default function App() {
   const handleSaveTask = (
     taskData: Omit<Task, 'id' | 'createdAt' | 'completed'> & { id?: string }
   ) => {
+    if (!currentUser) return;
+
     if (taskData.id) {
       // Edit existing
       setTasks((prev) =>
@@ -188,7 +216,7 @@ export default function App() {
       const notif = authStorage.addNotification(currentUser.id, {
         taskId: taskData.id,
         taskTitle: taskData.title,
-        title: 'Tâche mise à jour ✏️',
+        title: 'Tâche modifiée ✏️',
         message: `Les modifications de « ${taskData.title} » ont été enregistrées.`,
         type: 'info',
       });
@@ -213,23 +241,24 @@ export default function App() {
 
       setTasks((prev) => [newTask, ...prev]);
 
-      // Sound & In-App Alert
-      if (currentUser.settings.enableAudioAlerts) {
+      // Audio feedback
+      if (currentUser.settings?.enableAudioAlerts) {
         soundManager.playCreationChime();
       }
 
-      const dueDetails = newTask.dueTime ? ` prévue pour aujourd'hui à ${newTask.dueTime}` : ` pour le ${newTask.dueDate}`;
+      const dueDetails = newTask.dueTime ? ` prévue à ${newTask.dueTime}` : ` pour le ${newTask.dueDate}`;
       const notif = authStorage.addNotification(currentUser.id, {
         taskId: newTask.id,
         taskTitle: newTask.title,
-        title: 'Tâche créée avec succès ! 🚀',
-        message: `« ${newTask.title} »${dueDetails}. Rappel automatique configuré.`,
+        title: 'Tâche créée ! 🚀',
+        message: `« ${newTask.title} »${dueDetails}. Rappel automatique programmé.`,
         type: 'created',
       });
 
-      if (currentUser.settings.enableBrowserNotifications) {
+      if (currentUser.settings?.enableBrowserNotifications) {
         sendBrowserNotification('Nouvelle tâche créée', {
-          body: `« ${newTask.title} » ajoutée à votre planning.`,
+          body: `« ${newTask.title} » ajoutée avec succès.`,
+          taskId: newTask.id,
         });
       }
 
@@ -252,6 +281,7 @@ export default function App() {
   };
 
   const handleOpenCreateWithDate = (dateStr: string) => {
+    if (!currentUser) return;
     setEditingTask({
       id: '',
       userId: currentUser.id,
@@ -267,6 +297,7 @@ export default function App() {
   };
 
   const handleResetTasks = () => {
+    if (!currentUser) return;
     const defaultForUser = authStorage.getUserTasks(currentUser.id);
     setTasks(defaultForUser);
   };
@@ -280,11 +311,13 @@ export default function App() {
   };
 
   const handleMarkAllNotifsRead = () => {
+    if (!currentUser) return;
     authStorage.markAllNotificationsAsRead(currentUser.id);
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
 
   const handleClearAllNotifs = () => {
+    if (!currentUser) return;
     authStorage.clearNotifications(currentUser.id);
     setNotifications([]);
   };
@@ -295,6 +328,11 @@ export default function App() {
       setSelectedDetailTask(found);
     }
   };
+
+  // If no user is logged in, show the clean AuthScreen
+  if (!currentUser) {
+    return <AuthScreen onAuthenticated={handleUserAuthenticated} />;
+  }
 
   const todayStr = getTodayDateString();
   const todayPendingCount = tasks.filter(
@@ -331,13 +369,12 @@ export default function App() {
         {/* Hardware Status Bar */}
         <StatusBar />
 
-        {/* Dynamic App Header with Profile & Notification Bell */}
+        {/* App Header with Profile & Notification Bell */}
         <AppHeader
           currentUser={currentUser}
           unreadNotifsCount={unreadNotifsCount}
           onOpenNotifications={() => setIsNotifsDrawerOpen(true)}
           onOpenUserMenu={() => setIsUserMenuOpen(true)}
-          onOpenAuthModal={() => setIsAuthModalOpen(true)}
         />
 
         {/* Floating Notification Banner Alert */}
@@ -418,8 +455,8 @@ export default function App() {
                 onClearCompleted={handleClearCompleted}
                 onImportTasks={handleImportTasks}
                 onOpenInstallModal={() => setIsInstallModalOpen(true)}
-                onOpenAuthModal={() => setIsAuthModalOpen(true)}
                 onUpdateUserSettings={handleUpdateUserSettings}
+                onLogout={handleLogout}
               />
             </motion.div>
           )}
@@ -466,25 +503,14 @@ export default function App() {
         onClose={() => setIsInstallModalOpen(false)}
       />
 
-      {/* Accounts & Auth Modal */}
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        currentUser={currentUser}
-        onUserChanged={handleUserChanged}
-      />
-
       {/* User Profile Menu Modal */}
       <UserMenuModal
         isOpen={isUserMenuOpen}
         onClose={() => setIsUserMenuOpen(false)}
         currentUser={currentUser}
         tasks={tasks}
-        onOpenSwitchAccount={() => {
-          setIsUserMenuOpen(false);
-          setIsAuthModalOpen(true);
-        }}
         onUserUpdated={(updated) => setCurrentUser(updated)}
+        onLogout={handleLogout}
       />
 
       {/* Notifications Drawer */}

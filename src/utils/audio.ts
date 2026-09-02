@@ -17,6 +17,7 @@ class SoundManager {
     return this.ctx;
   }
 
+  // Play a gentle uplifting chime when creating a task
   playCreationChime() {
     try {
       const ctx = this.getContext();
@@ -37,8 +38,8 @@ class SoundManager {
       osc2.frequency.exponentialRampToValueAtTime(1046.50, now + 0.15); // C6
 
       gain.gain.setValueAtTime(0.01, now);
-      gain.gain.linearRampToValueAtTime(0.15, now + 0.05);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+      gain.gain.linearRampToValueAtTime(0.2, now + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
 
       osc1.connect(gain);
       osc2.connect(gain);
@@ -46,20 +47,21 @@ class SoundManager {
 
       osc1.start(now);
       osc2.start(now);
-      osc1.stop(now + 0.45);
-      osc2.stop(now + 0.45);
+      osc1.stop(now + 0.5);
+      osc2.stop(now + 0.5);
     } catch (e) {
       console.warn('Audio playback error', e);
     }
   }
 
+  // Play a pleasant, noticeable 3-note melodic reminder sequence
   playReminderChime() {
     try {
       const ctx = this.getContext();
       if (!ctx) return;
 
       const now = ctx.currentTime;
-      const notes = [659.25, 783.99, 1046.50]; // E5, G5, C6
+      const notes = [659.25, 783.99, 1046.50, 1318.51]; // E5, G5, C6, E6
       
       notes.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
@@ -69,74 +71,86 @@ class SoundManager {
         osc.frequency.setValueAtTime(freq, now + idx * 0.12);
 
         gain.gain.setValueAtTime(0.001, now + idx * 0.12);
-        gain.gain.linearRampToValueAtTime(0.18, now + idx * 0.12 + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.12 + 0.35);
+        gain.gain.linearRampToValueAtTime(0.25, now + idx * 0.12 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.12 + 0.45);
 
         osc.connect(gain);
         gain.connect(ctx.destination);
 
         osc.start(now + idx * 0.12);
-        osc.stop(now + idx * 0.12 + 0.4);
+        osc.stop(now + idx * 0.12 + 0.5);
       });
     } catch (e) {
       console.warn('Audio playback error', e);
     }
   }
 
+  // Play an unmistakable attention-grabbing dual-bell alarm when task is due
   playDueChime() {
     try {
       const ctx = this.getContext();
       if (!ctx) return;
 
       const now = ctx.currentTime;
-      const notes = [880, 880, 1174.66]; // A5, A5, D6
+      // 2 pulses of chime (Ding-Ding ... Ding-Ding)
+      const pulse1Notes = [880, 1174.66]; // A5 -> D6
+      const pulse2Notes = [880, 1318.51]; // A5 -> E6
       
-      notes.forEach((freq, idx) => {
+      const playTone = (freq: number, start: number, duration = 0.25) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
 
         osc.type = 'triangle';
-        osc.frequency.setValueAtTime(freq, now + idx * 0.15);
+        osc.frequency.setValueAtTime(freq, start);
 
-        gain.gain.setValueAtTime(0.001, now + idx * 0.15);
-        gain.gain.linearRampToValueAtTime(0.2, now + idx * 0.15 + 0.03);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.15 + 0.3);
+        gain.gain.setValueAtTime(0.001, start);
+        gain.gain.linearRampToValueAtTime(0.35, start + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
 
         osc.connect(gain);
         gain.connect(ctx.destination);
 
-        osc.start(now + idx * 0.15);
-        osc.stop(now + idx * 0.15 + 0.35);
-      });
+        osc.start(start);
+        osc.stop(start + duration + 0.05);
+      };
+
+      // First pulse
+      playTone(pulse1Notes[0], now, 0.2);
+      playTone(pulse1Notes[1], now + 0.15, 0.35);
+
+      // Second pulse
+      playTone(pulse2Notes[0], now + 0.45, 0.2);
+      playTone(pulse2Notes[1], now + 0.6, 0.45);
     } catch (e) {
       console.warn('Audio playback error', e);
     }
   }
 
+  // Play a rewarding chord when completing a task
   playCompletionChime() {
     try {
       const ctx = this.getContext();
       if (!ctx) return;
 
       const now = ctx.currentTime;
-      const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+      const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6 (C Major Chord)
       
       notes.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
         const gain = ctx.createGain();
 
         osc.type = 'sine';
-        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+        osc.frequency.setValueAtTime(freq, now + idx * 0.06);
 
-        gain.gain.setValueAtTime(0.001, now + idx * 0.08);
-        gain.gain.linearRampToValueAtTime(0.14, now + idx * 0.08 + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.45);
+        gain.gain.setValueAtTime(0.001, now + idx * 0.06);
+        gain.gain.linearRampToValueAtTime(0.2, now + idx * 0.06 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.06 + 0.5);
 
         osc.connect(gain);
         gain.connect(ctx.destination);
 
-        osc.start(now + idx * 0.08);
-        osc.stop(now + idx * 0.08 + 0.5);
+        osc.start(now + idx * 0.06);
+        osc.stop(now + idx * 0.06 + 0.55);
       });
     } catch (e) {
       console.warn('Audio playback error', e);

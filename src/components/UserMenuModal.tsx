@@ -7,39 +7,51 @@ import {
   Briefcase,
   Calendar,
   LogOut,
-  Users,
   Shield,
   Bell,
   CheckCircle2,
-  ListTodo,
-  CheckSquare,
   Sparkles,
+  Volume2,
 } from 'lucide-react';
 import { User, Task } from '../types';
 import { authStorage } from '../utils/authStorage';
 import { soundManager } from '../utils/audio';
+import { sendBrowserNotification, requestNotificationPermission } from '../utils/reminderEngine';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
   currentUser: User;
   tasks: Task[];
-  onOpenSwitchAccount: () => void;
   onUserUpdated: (user: User) => void;
+  onLogout: () => void;
 }
+
+const AVATAR_COLORS = [
+  '#4F46E5', // Indigo
+  '#EC4899', // Pink
+  '#10B981', // Emerald
+  '#F59E0B', // Amber
+  '#8B5CF6', // Purple
+  '#06B6D4', // Cyan
+  '#EF4444', // Red
+  '#3B82F6', // Blue
+];
 
 export const UserMenuModal: React.FC<Props> = ({
   isOpen,
   onClose,
   currentUser,
   tasks,
-  onOpenSwitchAccount,
   onUserUpdated,
+  onLogout,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [name, setName] = useState(currentUser.name);
   const [role, setRole] = useState(currentUser.role || '');
+  const [avatarColor, setAvatarColor] = useState(currentUser.avatarColor || AVATAR_COLORS[0]);
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [testAlertSent, setTestAlertSent] = useState(false);
 
   if (!isOpen) return null;
 
@@ -58,6 +70,7 @@ export const UserMenuModal: React.FC<Props> = ({
     const updated = authStorage.updateUserProfile(currentUser.id, {
       name: name.trim(),
       role: role.trim() || undefined,
+      avatarColor,
     });
     if (updated) {
       soundManager.playCreationChime();
@@ -68,6 +81,17 @@ export const UserMenuModal: React.FC<Props> = ({
         setIsEditing(false);
       }, 700);
     }
+  };
+
+  const handleTestNotification = async () => {
+    await requestNotificationPermission();
+    soundManager.playReminderChime();
+    sendBrowserNotification('🔔 Test de notification sonore réussi !', {
+      body: 'Vos alertes sonores et de tâches fonctionneront parfaitement même en arrière-plan.',
+      tag: 'test-notification',
+    });
+    setTestAlertSent(true);
+    setTimeout(() => setTestAlertSent(false), 3000);
   };
 
   return (
@@ -115,7 +139,7 @@ export const UserMenuModal: React.FC<Props> = ({
               </div>
               <div className="flex-1 min-w-0">
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-white/20 text-white backdrop-blur-sm">
-                  Compte Connecté
+                  Compte Privé
                 </span>
                 <h3 className="text-lg font-bold truncate mt-0.5">
                   {currentUser.name}
@@ -145,80 +169,122 @@ export const UserMenuModal: React.FC<Props> = ({
               </div>
             </div>
 
-            {/* Edit Profile Form or Details */}
+            {/* Profile Edition Section */}
             {isEditing ? (
-              <form onSubmit={handleSaveProfile} className="p-4 bg-neutral-50 rounded-2xl border border-neutral-200 space-y-3">
-                <h4 className="text-xs font-bold text-neutral-800">
-                  Modifier les informations de profil
-                </h4>
+              <form
+                onSubmit={handleSaveProfile}
+                className="bg-neutral-50 rounded-3xl p-4.5 border border-neutral-200/90 space-y-3.5"
+              >
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-700">
+                    Modifier mon profil
+                  </h4>
+                  <button
+                    type="button"
+                    onClick={() => setIsEditing(false)}
+                    className="text-xs text-neutral-500 hover:text-neutral-800"
+                  >
+                    Annuler
+                  </button>
+                </div>
 
                 <div>
-                  <label className="block text-xs text-neutral-600 mb-1">Nom complet</label>
+                  <label className="block text-xs font-medium text-neutral-600 mb-1">
+                    Nom complet
+                  </label>
                   <input
                     type="text"
                     required
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-neutral-200 rounded-xl text-xs text-neutral-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-3.5 py-2 bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs text-neutral-600 mb-1">Rôle / Métier</label>
+                  <label className="block text-xs font-medium text-neutral-600 mb-1">
+                    Rôle / Activité
+                  </label>
                   <input
                     type="text"
                     value={role}
                     onChange={(e) => setRole(e.target.value)}
-                    className="w-full px-3 py-2 bg-white border border-neutral-200 rounded-xl text-xs text-neutral-800 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                    className="w-full px-3.5 py-2 bg-white border border-neutral-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-600"
                   />
                 </div>
 
-                {savedSuccess && (
-                  <div className="text-xs text-emerald-600 font-bold flex items-center gap-1">
-                    <CheckCircle2 size={13} />
-                    <span>Modifications enregistrées !</span>
+                <div>
+                  <label className="block text-xs font-medium text-neutral-600 mb-1.5">
+                    Couleur d'avatar
+                  </label>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {AVATAR_COLORS.map((color) => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => setAvatarColor(color)}
+                        className={`w-6 h-6 rounded-full cursor-pointer transition-all ${
+                          avatarColor === color ? 'ring-2 ring-offset-2 ring-neutral-900 scale-110' : ''
+                        }`}
+                        style={{ backgroundColor: color }}
+                      />
+                    ))}
                   </div>
-                )}
-
-                <div className="flex items-center gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setIsEditing(false)}
-                    className="flex-1 py-2 text-xs font-semibold text-neutral-600 bg-white border border-neutral-200 rounded-xl"
-                  >
-                    Annuler
-                  </button>
-                  <button
-                    type="submit"
-                    className="flex-1 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl"
-                  >
-                    Sauvegarder
-                  </button>
                 </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+                >
+                  {savedSuccess ? (
+                    <>
+                      <CheckCircle2 size={16} />
+                      <span>Enregistré !</span>
+                    </>
+                  ) : (
+                    <span>Sauvegarder les modifications</span>
+                  )}
+                </button>
               </form>
             ) : (
               <button
+                type="button"
                 onClick={() => setIsEditing(true)}
-                className="w-full py-2.5 px-4 bg-neutral-100 hover:bg-neutral-200 active:scale-[0.99] text-neutral-800 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
+                className="w-full py-3 bg-neutral-100 hover:bg-neutral-200/80 text-neutral-800 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
-                <UserIcon size={14} />
-                <span>Modifier mon profil</span>
+                <span>Modifier mes informations</span>
               </button>
             )}
 
-            {/* Switch user / Logout */}
-            <div className="pt-2 border-t border-neutral-100 space-y-2">
+            {/* Test Background Notifications & Audio */}
+            <div className="bg-indigo-50/70 border border-indigo-100 rounded-2xl p-4 flex items-center justify-between gap-3">
+              <div>
+                <h4 className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                  <Volume2 size={15} className="text-indigo-600" />
+                  Test de notification & son
+                </h4>
+                <p className="text-[11px] text-indigo-700/80 mt-0.5">
+                  Vérifier que les alertes sonores et push fonctionnent sur cet appareil.
+                </p>
+              </div>
+
               <button
-                onClick={() => {
-                  onClose();
-                  onOpenSwitchAccount();
-                }}
-                className="w-full py-3 px-4 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-2xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer border border-indigo-100"
+                type="button"
+                onClick={handleTestNotification}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shrink-0 cursor-pointer shadow-xs"
               >
-                <Users size={16} />
-                <span>Changer d'utilisateur ou créer un compte</span>
+                {testAlertSent ? 'Envoyé !' : 'Tester'}
               </button>
             </div>
+
+            {/* Logout Button */}
+            <button
+              onClick={onLogout}
+              className="w-full py-3.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-colors cursor-pointer border border-rose-200/70"
+            >
+              <LogOut size={16} />
+              <span>Se déconnecter de ce compte</span>
+            </button>
           </div>
         </motion.div>
       </div>
