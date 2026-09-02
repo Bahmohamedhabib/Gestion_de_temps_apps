@@ -100,7 +100,9 @@ export const authStorage = {
       settings: {
         enableAudioAlerts: true,
         enableBrowserNotifications: true,
+        enableVibration: true,
         defaultReminderMinutes: 15,
+        defaultAlarmSound: 'digital',
         soundTheme: 'chime',
       },
     };

@@ -1,4 +1,4 @@
-import { Task, User, AppNotification } from '../types';
+import { Task, User, AppNotification, ActiveAlarm, AlarmSoundType } from '../types';
 import { soundManager } from './audio';
 import { authStorage } from './authStorage';
 
@@ -39,28 +39,28 @@ export async function requestNotificationPermission(): Promise<NotificationPermi
 }
 
 // Send system notification (works in background through Service Worker or native Web Notification API)
-export function sendBrowserNotification(title: string, options?: NotificationOptions & { taskId?: string }) {
+export function sendBrowserNotification(
+  title: string,
+  options?: NotificationOptions & { taskId?: string; sound?: AlarmSoundType }
+) {
   if (typeof window === 'undefined' || !('Notification' in window)) return;
-  
-  if (Notification.permission === 'granted') {
-    // Vibrate device if supported (haptic feedback)
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-      try {
-        navigator.vibrate([300, 150, 300, 150, 400]);
-      } catch (e) {
-        // ignore
-      }
-    }
 
+  if (Notification.permission === 'granted') {
     const notifOptions: NotificationOptions & Record<string, unknown> = {
       icon: '/favicon.ico',
       badge: '/favicon.ico',
-      tag: options?.tag || 'task-alert',
-      requireInteraction: true, // Remains on screen until dismissed
+      tag: options?.tag || 'task-alarm',
+      requireInteraction: true, // Stays on screen until user dismisses or acts
       renotify: true,
+      vibrate: [600, 200, 600, 200, 600],
       data: {
         taskId: options?.taskId,
+        sound: options?.sound || 'digital',
       },
+      actions: [
+        { action: 'open_alarm', title: '⏰ Arrêter / Ouvrir' },
+        { action: 'snooze_5', title: '💤 Répéter 5 min' },
+      ],
       ...options,
     };
 
@@ -89,55 +89,92 @@ export function sendBrowserNotification(title: string, options?: NotificationOpt
   }
 }
 
-// Check deadline reminders
-export function checkTaskReminders(
-  tasks: Task[],
-  user: User,
-  onAlertTriggered?: (alert: AppNotification) => void
-) {
-  if (!tasks || tasks.length === 0 || !user) return;
+// Sync upcoming alarms with Service Worker for background triggering
+export function syncAlarmsToServiceWorker(tasks: Task[], user: User) {
+  if (!navigator.serviceWorker || !navigator.serviceWorker.controller) return;
 
-  const now = new Date();
-  const todayStr = now.toISOString().split('T')[0];
-  const nowMs = now.getTime();
-
+  const now = Date.now();
   tasks.forEach((task) => {
-    // Only check incomplete tasks with a due time on today's date
     if (task.completed || !task.dueDate || !task.dueTime) return;
-
-    // Check if task is today
-    if (task.dueDate !== todayStr) return;
 
     const [hours, minutes] = task.dueTime.split(':').map(Number);
     if (isNaN(hours) || isNaN(minutes)) return;
 
-    const taskTime = new Date();
-    taskTime.setHours(hours, minutes, 0, 0);
-    const taskMs = taskTime.getTime();
+    const [year, month, day] = task.dueDate.split('-').map(Number);
+    const dueTimeDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
+    const dueTimestamp = dueTimeDate.getTime();
 
-    // Difference in minutes
-    const diffMinutes = Math.round((taskMs - nowMs) / (1000 * 60));
+    const reminderLead =
+      task.reminderMinutesBefore ?? user.settings?.defaultReminderMinutes ?? 15;
+    const sound = task.alarmSound || user.settings?.defaultAlarmSound || 'digital';
 
-    const reminderLead = task.reminderMinutesBefore ?? user.settings?.defaultReminderMinutes ?? 15;
+    // 1. Approaching Reminder Alarm
+    if (reminderLead > 0) {
+      const reminderTimestamp = dueTimestamp - reminderLead * 60 * 1000;
+      if (reminderTimestamp > now) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'SCHEDULE_ALARM',
+          id: `alarm_${task.id}_reminder`,
+          taskId: task.id,
+          title: `⏰ ALARME : Dans ${reminderLead} min`,
+          body: `« ${task.title} » est prévue pour ${task.dueTime} !`,
+          triggerTimestamp: reminderTimestamp,
+          alarmType: 'reminder',
+          sound,
+        });
+      }
+    }
 
-    // 1. Approaching Reminder (e.g., exactly at reminderLead minutes, between [reminderLead - 2, reminderLead + 1])
-    if (reminderLead > 0 && diffMinutes > 0 && diffMinutes <= reminderLead) {
-      const alertedKey = `alerted_${user.id}_${task.id}_approaching_${task.dueDate}_${task.dueTime}`;
-      if (!sessionStorage.getItem(alertedKey)) {
-        sessionStorage.setItem(alertedKey, 'true');
+    // 2. Exact Due Time Alarm
+    if (dueTimestamp > now) {
+      navigator.serviceWorker.controller.postMessage({
+        type: 'SCHEDULE_ALARM',
+        id: `alarm_${task.id}_due`,
+        taskId: task.id,
+        title: `🚨 ALARME : C'est l'heure !`,
+        body: `« ${task.title} » commence maintenant (${task.dueTime}).`,
+        triggerTimestamp: dueTimestamp,
+        alarmType: 'due',
+        sound,
+      });
+    }
+  });
+}
 
-        const title = `⏰ Rappel : Dans ${diffMinutes} min`;
-        const message = `« ${task.title} » arrive à échéance à ${task.dueTime} !`;
+// High-precision Alarm Checker
+export function checkTaskReminders(
+  tasks: Task[],
+  user: User,
+  onAlertTriggered?: (alert: AppNotification) => void,
+  onAlarmRinging?: (alarm: ActiveAlarm) => void
+) {
+  if (!tasks || tasks.length === 0 || !user) return;
+
+  const now = Date.now();
+
+  tasks.forEach((task) => {
+    if (task.completed) return;
+
+    // Check snoozed alarms
+    if (task.snoozedUntil && task.snoozedUntil <= now && task.snoozedUntil >= now - 60000) {
+      const snoozeKey = `alarm_snooze_fired_${task.id}_${task.snoozedUntil}`;
+      if (!localStorage.getItem(snoozeKey)) {
+        localStorage.setItem(snoozeKey, 'true');
+
+        const sound = task.alarmSound || user.settings?.defaultAlarmSound || 'digital';
+        const title = `⏰ RAPPEL RÉPÉTÉ (SNOOZE)`;
+        const message = `C'est le moment d'effectuer : « ${task.title} » !`;
 
         if (user.settings?.enableAudioAlerts) {
-          soundManager.playReminderChime();
+          soundManager.startAlarm(sound, user.settings?.enableVibration ?? true);
         }
 
         if (user.settings?.enableBrowserNotifications) {
           sendBrowserNotification(title, {
             body: message,
-            tag: `reminder-${task.id}`,
+            tag: `snooze-${task.id}`,
             taskId: task.id,
+            sound,
           });
         }
 
@@ -149,23 +186,94 @@ export function checkTaskReminders(
           type: 'reminder',
         });
 
-        if (onAlertTriggered) {
-          onAlertTriggered(notif);
+        if (onAlertTriggered) onAlertTriggered(notif);
+        if (onAlarmRinging) {
+          onAlarmRinging({
+            task,
+            type: 'snooze',
+            title,
+            message,
+            sound,
+            startedAt: now,
+          });
+        }
+      }
+      return;
+    }
+
+    if (!task.dueDate || !task.dueTime) return;
+
+    const [hours, minutes] = task.dueTime.split(':').map(Number);
+    if (isNaN(hours) || isNaN(minutes)) return;
+
+    const [year, month, day] = task.dueDate.split('-').map(Number);
+    const dueTimeDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
+    const dueTimestamp = dueTimeDate.getTime();
+
+    const reminderLead =
+      task.reminderMinutesBefore ?? user.settings?.defaultReminderMinutes ?? 15;
+    const sound = task.alarmSound || user.settings?.defaultAlarmSound || 'digital';
+
+    // 1. Approaching Reminder Alarm (e.g. 15 minutes before)
+    if (reminderLead > 0) {
+      const reminderTimestamp = dueTimestamp - reminderLead * 60 * 1000;
+      // Trigger if we are at or past the reminder time, within a 90 second window
+      if (now >= reminderTimestamp && now < reminderTimestamp + 90000) {
+        const reminderKey = `alarm_reminder_fired_${user.id}_${task.id}_${task.dueDate}_${task.dueTime}_${reminderLead}`;
+        if (!localStorage.getItem(reminderKey)) {
+          localStorage.setItem(reminderKey, 'true');
+
+          const title = `⏰ ALARME : Dans ${reminderLead} min !`;
+          const message = `« ${task.title} » est prévue pour ${task.dueTime}. Préparez-vous !`;
+
+          if (user.settings?.enableAudioAlerts) {
+            soundManager.startAlarm(sound, user.settings?.enableVibration ?? true);
+          }
+
+          if (user.settings?.enableBrowserNotifications) {
+            sendBrowserNotification(title, {
+              body: message,
+              tag: `reminder-${task.id}`,
+              taskId: task.id,
+              sound,
+            });
+          }
+
+          const notif = authStorage.addNotification(user.id, {
+            taskId: task.id,
+            taskTitle: task.title,
+            title,
+            message,
+            type: 'reminder',
+          });
+
+          if (onAlertTriggered) onAlertTriggered(notif);
+          if (onAlarmRinging) {
+            onAlarmRinging({
+              task,
+              type: 'reminder',
+              title,
+              message,
+              minutesBefore: reminderLead,
+              sound,
+              startedAt: now,
+            });
+          }
         }
       }
     }
 
-    // 2. Due Right Now (between -1 min and +2 min)
-    if (diffMinutes <= 1 && diffMinutes >= -2) {
-      const alertedDueKey = `alerted_${user.id}_${task.id}_due_${task.dueDate}_${task.dueTime}`;
-      if (!sessionStorage.getItem(alertedDueKey)) {
-        sessionStorage.setItem(alertedDueKey, 'true');
+    // 2. Exact Due Time Alarm
+    if (now >= dueTimestamp && now < dueTimestamp + 90000) {
+      const dueKey = `alarm_due_fired_${user.id}_${task.id}_${task.dueDate}_${task.dueTime}`;
+      if (!localStorage.getItem(dueKey)) {
+        localStorage.setItem(dueKey, 'true');
 
-        const title = `🚨 C'est l'heure de votre tâche !`;
-        const message = `« ${task.title} » est programmée pour maintenant (${task.dueTime}).`;
+        const title = `🚨 C'EST L'HEURE DE VOTRE TÂCHE !`;
+        const message = `« ${task.title} » commence maintenant (${task.dueTime}).`;
 
         if (user.settings?.enableAudioAlerts) {
-          soundManager.playDueChime();
+          soundManager.startAlarm(sound, user.settings?.enableVibration ?? true);
         }
 
         if (user.settings?.enableBrowserNotifications) {
@@ -173,6 +281,7 @@ export function checkTaskReminders(
             body: message,
             tag: `due-${task.id}`,
             taskId: task.id,
+            sound,
           });
         }
 
@@ -184,10 +293,58 @@ export function checkTaskReminders(
           type: 'due',
         });
 
-        if (onAlertTriggered) {
-          onAlertTriggered(notif);
+        if (onAlertTriggered) onAlertTriggered(notif);
+        if (onAlarmRinging) {
+          onAlarmRinging({
+            task,
+            type: 'due',
+            title,
+            message,
+            sound,
+            startedAt: now,
+          });
         }
       }
     }
   });
 }
+
+// Trigger a manual test alarm
+export function triggerTestAlarm(
+  user: User,
+  sound: AlarmSoundType,
+  onAlarmRinging: (alarm: ActiveAlarm) => void
+) {
+  const dummyTask: Task = {
+    id: 'test-alarm-' + Date.now(),
+    title: 'Test de Sonnerie d\'Alarme Réveil 🔔',
+    description: 'Vérification du volume sonore, des pulsations et du système de rappel.',
+    completed: false,
+    dueDate: new Date().toISOString().split('T')[0],
+    dueTime: new Date().toTimeString().slice(0, 5),
+    priority: 'high',
+    category: 'work',
+    subtasks: [],
+    createdAt: new Date().toISOString(),
+    alarmSound: sound,
+  };
+
+  soundManager.startAlarm(sound, user.settings?.enableVibration ?? true);
+
+  if (user.settings?.enableBrowserNotifications) {
+    sendBrowserNotification('⏰ Test de Sonnerie d\'Alarme', {
+      body: 'La sonnerie d\'alarme et les vibrations fonctionnent à pleine puissance !',
+      sound,
+    });
+  }
+
+  onAlarmRinging({
+    task: dummyTask,
+    type: 'test',
+    title: '🔔 Test d\'Alarme en cours',
+    message: 'Le système sonore sonne en continu jusqu\'à ce que vous appuyiez sur "Arrêter".',
+    sound,
+    startedAt: Date.now(),
+  });
+}
+

@@ -12,10 +12,13 @@ import {
   CheckCircle2,
   Bell,
   BellRing,
+  Volume2,
+  Sparkles,
 } from 'lucide-react';
-import { Task, CategoryId, Priority, SubTask } from '../types';
+import { Task, CategoryId, Priority, SubTask, AlarmSoundType } from '../types';
 import { CATEGORIES, getTodayDateString, getRelativeDateString } from '../data/defaultTasks';
 import { CategoryIcon } from './CategoryIcon';
+import { soundManager } from '../utils/audio';
 
 interface Props {
   isOpen: boolean;
@@ -23,6 +26,7 @@ interface Props {
   onSave: (taskData: Omit<Task, 'id' | 'createdAt' | 'completed'> & { id?: string }) => void;
   initialTask?: Task | null;
   defaultReminderMinutes?: number;
+  defaultAlarmSound?: AlarmSoundType;
 }
 
 const QUICK_TIMES = [
@@ -34,12 +38,19 @@ const QUICK_TIMES = [
 ];
 
 const REMINDER_OPTIONS = [
-  { label: 'À l\'heure exacte', value: 0 },
-  { label: '5 min avant', value: 5 },
-  { label: '15 min avant', value: 15 },
-  { label: '30 min avant', value: 30 },
-  { label: '1h avant', value: 60 },
-  { label: '1 jour avant', value: 1440 },
+  { label: 'À l\'heure exacte (0 min)', value: 0 },
+  { label: '5 minutes avant', value: 5 },
+  { label: '10 minutes avant', value: 10 },
+  { label: '15 minutes avant (Recommandé)', value: 15 },
+  { label: '30 minutes avant', value: 30 },
+  { label: '1 heure avant', value: 60 },
+];
+
+const ALARM_SOUND_OPTIONS: { id: AlarmSoundType; label: string; desc: string }[] = [
+  { id: 'digital', label: '⏰ Alarme Digitale', desc: 'Bip-Bip classique et percutant' },
+  { id: 'melodic', label: '🎵 Réveil Harmonique', desc: 'Mélodie ascendante énergique' },
+  { id: 'siren', label: '🚨 Sirène d\'Urgence', desc: 'Alerte haute intensité' },
+  { id: 'gentle', label: '🔔 Carillon Zen', desc: 'Cloches douces et claires' },
 ];
 
 export const TaskModal: React.FC<Props> = ({
@@ -48,6 +59,7 @@ export const TaskModal: React.FC<Props> = ({
   onSave,
   initialTask,
   defaultReminderMinutes = 15,
+  defaultAlarmSound = 'digital',
 }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -57,6 +69,7 @@ export const TaskModal: React.FC<Props> = ({
   const [dueTime, setDueTime] = useState('');
   const [reminder, setReminder] = useState(true);
   const [reminderMinutesBefore, setReminderMinutesBefore] = useState<number>(defaultReminderMinutes);
+  const [alarmSound, setAlarmSound] = useState<AlarmSoundType>(defaultAlarmSound);
   const [subtasks, setSubtasks] = useState<SubTask[]>([]);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const [error, setError] = useState('');
@@ -71,6 +84,7 @@ export const TaskModal: React.FC<Props> = ({
       setDueTime(initialTask.dueTime || '');
       setReminder(initialTask.reminder ?? true);
       setReminderMinutesBefore(initialTask.reminderMinutesBefore ?? defaultReminderMinutes);
+      setAlarmSound(initialTask.alarmSound || defaultAlarmSound);
       setSubtasks(initialTask.subtasks || []);
     } else {
       setTitle('');
@@ -81,10 +95,11 @@ export const TaskModal: React.FC<Props> = ({
       setDueTime('');
       setReminder(true);
       setReminderMinutesBefore(defaultReminderMinutes);
+      setAlarmSound(defaultAlarmSound);
       setSubtasks([]);
     }
     setError('');
-  }, [initialTask, isOpen, defaultReminderMinutes]);
+  }, [initialTask, isOpen, defaultReminderMinutes, defaultAlarmSound]);
 
   const handleAddSubtask = () => {
     if (!newSubtaskTitle.trim()) return;
@@ -100,6 +115,21 @@ export const TaskModal: React.FC<Props> = ({
   const handleRemoveSubtask = (id: string) => {
     setSubtasks(subtasks.filter((s) => s.id !== id));
   };
+
+  // Calculate the exact time the alarm will sound
+  const calculateAlarmTime = () => {
+    if (!dueTime) return null;
+    const [h, m] = dueTime.split(':').map(Number);
+    if (isNaN(h) || isNaN(m)) return null;
+
+    let targetTotalMin = h * 60 + m - reminderMinutesBefore;
+    if (targetTotalMin < 0) targetTotalMin += 24 * 60;
+    const targetH = Math.floor(targetTotalMin / 60) % 24;
+    const targetM = targetTotalMin % 60;
+    return `${targetH.toString().padStart(2, '0')}:${targetM.toString().padStart(2, '0')}`;
+  };
+
+  const calculatedAlarmTime = calculateAlarmTime();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,6 +148,7 @@ export const TaskModal: React.FC<Props> = ({
       dueTime: dueTime || undefined,
       reminder: reminder && !!dueTime,
       reminderMinutesBefore: reminder && !!dueTime ? reminderMinutesBefore : undefined,
+      alarmSound,
       subtasks,
     });
     onClose();
@@ -151,8 +182,8 @@ export const TaskModal: React.FC<Props> = ({
               </h3>
               <p className="text-xs text-neutral-500">
                 {initialTask?.id
-                  ? 'Mettez à jour les détails et vos rappels'
-                  : 'Définissez l\'échéance, la priorité et les alertes'}
+                  ? 'Mettez à jour les détails et la sonnerie d\'alarme'
+                  : 'Définissez l\'échéance, la sonnerie et les rappels sonores'}
               </p>
             </div>
             <button
@@ -282,7 +313,7 @@ export const TaskModal: React.FC<Props> = ({
               <div>
                 <label className="block text-xs font-bold text-neutral-700 mb-1 flex items-center gap-1.5">
                   <Clock size={13} className="text-neutral-500" />
-                  <span>Heure précise (optionnel)</span>
+                  <span>Heure précise</span>
                 </label>
                 <input
                   type="time"
@@ -321,20 +352,23 @@ export const TaskModal: React.FC<Props> = ({
               )}
             </div>
 
-            {/* Smart Reminder & Notification Setting */}
+            {/* Enhanced Smart Alarm & Reminder System */}
             {dueTime && (
-              <div className="p-3.5 rounded-2xl bg-indigo-50/70 border border-indigo-100 space-y-2.5">
+              <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50/90 via-indigo-50/40 to-purple-50/50 border border-indigo-200/80 space-y-3 shadow-2xs">
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 bg-indigo-600 text-white rounded-lg">
-                      <BellRing size={14} />
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 bg-indigo-600 text-white rounded-xl shadow-xs">
+                      <BellRing size={16} className="animate-pulse" />
                     </div>
                     <div>
-                      <h4 className="text-xs font-bold text-indigo-950">
-                        Rappel sonore & Alerte
+                      <h4 className="text-xs font-extrabold text-indigo-950 flex items-center gap-1.5">
+                        <span>Système d'Alarme & Sonnerie</span>
+                        <span className="px-1.5 py-0.2 bg-indigo-200/70 text-indigo-900 rounded text-[9px] font-black uppercase">
+                          Réveil
+                        </span>
                       </h4>
                       <p className="text-[10px] text-indigo-700">
-                        Notification automatique à l'approche de l'heure
+                        Sonne en continu avec vibrations comme un vrai réveil
                       </p>
                     </div>
                   </div>
@@ -350,21 +384,88 @@ export const TaskModal: React.FC<Props> = ({
                 </div>
 
                 {reminder && (
-                  <div>
-                    <label className="block text-[11px] font-bold text-indigo-900 mb-1">
-                      Quand vous avertir ?
-                    </label>
-                    <select
-                      value={reminderMinutesBefore}
-                      onChange={(e) => setReminderMinutesBefore(Number(e.target.value))}
-                      className="w-full px-3 py-1.5 bg-white border border-indigo-200 rounded-xl text-xs text-indigo-950 font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                    >
-                      {REMINDER_OPTIONS.map((opt) => (
-                        <option key={opt.value} value={opt.value}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="space-y-3 pt-1">
+                    {/* Timing Selector */}
+                    <div>
+                      <label className="block text-[11px] font-bold text-indigo-900 mb-1">
+                        Moment du déclenchement de l'alarme
+                      </label>
+                      <select
+                        value={reminderMinutesBefore}
+                        onChange={(e) => setReminderMinutesBefore(Number(e.target.value))}
+                        className="w-full px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs text-indigo-950 font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs"
+                      >
+                        {REMINDER_OPTIONS.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Calculated Time Live Preview Banner */}
+                    {calculatedAlarmTime && (
+                      <div className="p-2.5 bg-indigo-600/10 border border-indigo-200 rounded-xl text-xs text-indigo-950 flex items-center justify-between">
+                        <span className="text-[11px] font-medium text-indigo-800">
+                          {reminderMinutesBefore === 0
+                            ? `⚡ L'alarme sonnera exactement à ${dueTime}`
+                            : `⚡ L'alarme sonnera à ${calculatedAlarmTime} (${reminderMinutesBefore} min avant ${dueTime})`}
+                        </span>
+                        <span className="text-[11px] font-black text-indigo-700 bg-white px-2 py-0.5 rounded-lg border border-indigo-200">
+                          {calculatedAlarmTime}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Alarm Ringtone Choice & Test */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-[11px] font-bold text-indigo-900 flex items-center gap-1">
+                          <Volume2 size={12} className="text-indigo-600" />
+                          <span>Choix de la sonnerie d'alarme</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => soundManager.testAlarmSound(alarmSound)}
+                          className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 bg-white px-2 py-0.5 rounded-md border border-indigo-200 cursor-pointer active:scale-95"
+                        >
+                          <Volume2 size={11} />
+                          <span>Écouter un extrait</span>
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        {ALARM_SOUND_OPTIONS.map((snd) => {
+                          const isSelected = alarmSound === snd.id;
+                          return (
+                            <button
+                              key={snd.id}
+                              type="button"
+                              onClick={() => {
+                                setAlarmSound(snd.id);
+                                soundManager.testAlarmSound(snd.id);
+                              }}
+                              className={`p-2 rounded-xl text-left border transition-all cursor-pointer ${
+                                isSelected
+                                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-xs'
+                                  : 'bg-white text-neutral-800 border-indigo-100 hover:border-indigo-200'
+                              }`}
+                            >
+                              <div className="text-[11px] font-bold truncate">
+                                {snd.label}
+                              </div>
+                              <div
+                                className={`text-[9px] truncate ${
+                                  isSelected ? 'text-indigo-100' : 'text-neutral-500'
+                                }`}
+                              >
+                                {snd.desc}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -451,3 +552,4 @@ export const TaskModal: React.FC<Props> = ({
     </AnimatePresence>
   );
 };
+

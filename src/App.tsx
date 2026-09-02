@@ -5,7 +5,7 @@ import {
   Maximize2,
   Minimize2,
 } from 'lucide-react';
-import { Task, TabType, User, AppNotification, UserSettings } from './types';
+import { Task, TabType, User, AppNotification, UserSettings, ActiveAlarm, AlarmSoundType } from './types';
 import { getTodayDateString } from './data/defaultTasks';
 import { authStorage } from './utils/authStorage';
 import { soundManager } from './utils/audio';
@@ -13,6 +13,8 @@ import {
   checkTaskReminders,
   sendBrowserNotification,
   initServiceWorker,
+  syncAlarmsToServiceWorker,
+  triggerTestAlarm,
 } from './utils/reminderEngine';
 
 // Components
@@ -30,6 +32,7 @@ import { UserMenuModal } from './components/UserMenuModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
 import { NotificationBanner } from './components/NotificationBanner';
 import { AuthScreen } from './components/AuthScreen';
+import { AlarmRingingModal } from './components/AlarmRingingModal';
 
 export default function App() {
   // Current user state (strictly private account)
@@ -46,6 +49,9 @@ export default function App() {
     const user = authStorage.getCurrentUser();
     return user ? authStorage.getUserNotifications(user.id) : [];
   });
+
+  // Active continuous ringing alarm (Modal overlay)
+  const [activeAlarm, setActiveAlarm] = useState<ActiveAlarm | null>(null);
 
   // Active floating alert banner
   const [activeAlert, setActiveAlert] = useState<AppNotification | null>(null);
@@ -64,6 +70,48 @@ export default function App() {
   useEffect(() => {
     initServiceWorker();
   }, []);
+
+  // Listen for messages from background Service Worker (e.g. notifications clicked or background alarms)
+  useEffect(() => {
+    if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return;
+
+    const handleServiceWorkerMessage = (event: MessageEvent) => {
+      const { type, taskId, sound } = event.data || {};
+      if (type === 'TRIGGER_ALARM_SCREEN' && taskId) {
+        const foundTask = tasks.find((t) => t.id === taskId);
+        if (foundTask) {
+          const alarmSound: AlarmSoundType = sound || foundTask.alarmSound || currentUser?.settings?.defaultAlarmSound || 'digital';
+          setActiveAlarm({
+            taskId: foundTask.id,
+            task: foundTask,
+            type: 'due',
+            title: `⏰ ALARME : ${foundTask.title}`,
+            message: `C'est l'heure de votre tâche : « ${foundTask.title} »`,
+            timestamp: Date.now(),
+            sound: alarmSound,
+          });
+          if (currentUser?.settings?.enableAudioAlerts ?? true) {
+            soundManager.startContinuousAlarm(alarmSound, currentUser?.settings?.enableVibration ?? true);
+          }
+        }
+      } else if (type === 'STOP_ALARM') {
+        soundManager.stopAlarm();
+        setActiveAlarm(null);
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', handleServiceWorkerMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
+    };
+  }, [tasks, currentUser]);
+
+  // Sync scheduled alarms to Service Worker for background wakeups whenever tasks change
+  useEffect(() => {
+    if (currentUser) {
+      syncAlarmsToServiceWorker(tasks, currentUser);
+    }
+  }, [tasks, currentUser]);
 
   // Save tasks to user storage whenever they change
   useEffect(() => {
@@ -84,6 +132,8 @@ export default function App() {
 
   // Handle user logout
   const handleLogout = () => {
+    soundManager.stopAlarm();
+    setActiveAlarm(null);
     authStorage.logout();
     setCurrentUser(null);
     setTasks([]);
@@ -118,25 +168,73 @@ export default function App() {
     }
   }, [tasks]);
 
-  // Deadline reminder checker interval (every 8 seconds)
+  // High-precision deadline & alarm checker (runs every 1.5 seconds)
   useEffect(() => {
     if (!currentUser) return;
 
     const runChecker = () => {
-      checkTaskReminders(tasks, currentUser, (newAlert) => {
-        setNotifications((prev) => [newAlert, ...prev]);
-        setActiveAlert(newAlert);
-      });
+      checkTaskReminders(
+        tasks,
+        currentUser,
+        (newAlert) => {
+          setNotifications((prev) => [newAlert, ...prev]);
+          setActiveAlert(newAlert);
+        },
+        (ringingAlarm) => {
+          setActiveAlarm(ringingAlarm);
+        }
+      );
     };
 
     runChecker();
-    const interval = setInterval(runChecker, 8000);
+    const interval = setInterval(runChecker, 1500);
     return () => clearInterval(interval);
   }, [tasks, currentUser]);
+
+  // Handlers for Stopping and Snoozing Continuous Alarms
+  const handleStopAlarm = () => {
+    soundManager.stopAlarm();
+    setActiveAlarm(null);
+  };
+
+  const handleSnoozeAlarm = (minutes: number) => {
+    soundManager.stopAlarm();
+    if (activeAlarm?.task && currentUser) {
+      const snoozeUntil = Date.now() + minutes * 60 * 1000;
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === activeAlarm.task.id ? { ...t, snoozedUntil: snoozeUntil } : t
+        )
+      );
+
+      const snoozeNotif = authStorage.addNotification(currentUser.id, {
+        taskId: activeAlarm.task.id,
+        taskTitle: activeAlarm.task.title,
+        title: `Répétition programmée ⏳ (+${minutes} min)`,
+        message: `L'alarme pour « ${activeAlarm.task.title} » sonnera à nouveau dans ${minutes} minute(s).`,
+        type: 'reminder',
+      });
+      setNotifications((prev) => [snoozeNotif, ...prev]);
+      setActiveAlert(snoozeNotif);
+    }
+    setActiveAlarm(null);
+  };
+
+  const handleTriggerTestAlarm = (sound: AlarmSoundType) => {
+    if (!currentUser) return;
+    triggerTestAlarm(currentUser, sound, (testAlarm) => {
+      setActiveAlarm(testAlarm);
+    });
+  };
 
   // Handlers for tasks
   const handleToggleComplete = (taskId: string) => {
     if (!currentUser) return;
+
+    // If task was ringing, silence it
+    if (activeAlarm?.taskId === taskId) {
+      handleStopAlarm();
+    }
 
     setTasks((prev) =>
       prev.map((t) => {
@@ -234,6 +332,7 @@ export default function App() {
         dueTime: taskData.dueTime,
         reminder: taskData.reminder,
         reminderMinutesBefore: taskData.reminderMinutesBefore,
+        alarmSound: taskData.alarmSound || currentUser.settings?.defaultAlarmSound || 'digital',
         subtasks: taskData.subtasks || [],
         completed: false,
         createdAt: new Date().toISOString(),
@@ -246,18 +345,21 @@ export default function App() {
         soundManager.playCreationChime();
       }
 
+      const reminderInfo = newTask.reminder
+        ? ` Sonnera ${newTask.reminderMinutesBefore || 15} min avant.`
+        : '';
       const dueDetails = newTask.dueTime ? ` prévue à ${newTask.dueTime}` : ` pour le ${newTask.dueDate}`;
       const notif = authStorage.addNotification(currentUser.id, {
         taskId: newTask.id,
         taskTitle: newTask.title,
         title: 'Tâche créée ! 🚀',
-        message: `« ${newTask.title} »${dueDetails}. Rappel automatique programmé.`,
+        message: `« ${newTask.title} »${dueDetails}.${reminderInfo}`,
         type: 'created',
       });
 
       if (currentUser.settings?.enableBrowserNotifications) {
-        sendBrowserNotification('Nouvelle tâche créée', {
-          body: `« ${newTask.title} » ajoutée avec succès.`,
+        sendBrowserNotification('Nouvelle tâche créée 🚀', {
+          body: `« ${newTask.title} » ajoutée avec succès.${reminderInfo}`,
           taskId: newTask.id,
         });
       }
@@ -269,6 +371,9 @@ export default function App() {
   };
 
   const handleDeleteTask = (taskId: string) => {
+    if (activeAlarm?.taskId === taskId) {
+      handleStopAlarm();
+    }
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
     if (selectedDetailTask?.id === taskId) {
       setSelectedDetailTask(null);
@@ -289,6 +394,9 @@ export default function App() {
       category: 'work',
       priority: 'medium',
       dueDate: dateStr,
+      alarmSound: currentUser.settings?.defaultAlarmSound || 'digital',
+      reminderMinutesBefore: currentUser.settings?.defaultReminderMinutes ?? 15,
+      reminder: true,
       subtasks: [],
       completed: false,
       createdAt: '',
@@ -457,6 +565,7 @@ export default function App() {
                 onOpenInstallModal={() => setIsInstallModalOpen(true)}
                 onUpdateUserSettings={handleUpdateUserSettings}
                 onLogout={handleLogout}
+                onTriggerTestAlarm={handleTriggerTestAlarm}
               />
             </motion.div>
           )}
@@ -473,6 +582,13 @@ export default function App() {
           todayPendingCount={todayPendingCount}
         />
       </main>
+
+      {/* Real-time Continuous Ringing Alarm Modal Screen */}
+      <AlarmRingingModal
+        activeAlarm={activeAlarm}
+        onStopAlarm={handleStopAlarm}
+        onSnooze={handleSnoozeAlarm}
+      />
 
       {/* Task Creation & Edit Modal */}
       <TaskModal
@@ -525,3 +641,4 @@ export default function App() {
     </div>
   );
 }
+

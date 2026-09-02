@@ -16,6 +16,8 @@ export interface SubTask {
   completed: boolean;
 }
 
+export type AlarmSoundType = 'digital' | 'melodic' | 'siren' | 'gentle';
+
 export interface Task {
   id: string;
   userId?: string;
@@ -30,7 +32,9 @@ export interface Task {
   createdAt: string;
   completedAt?: string;
   reminder?: boolean;
-  reminderMinutesBefore?: number; // e.g. 0, 15, 30, 60
+  reminderMinutesBefore?: number; // e.g. 0, 5, 10, 15, 30, 60
+  alarmSound?: AlarmSoundType;
+  snoozedUntil?: number; // Timestamp in ms
 }
 
 export type TabType = 'tasks' | 'calendar' | 'stats' | 'settings';
@@ -42,8 +46,10 @@ export type SortOption = 'dueDate' | 'priority' | 'title' | 'createdAt';
 export interface UserSettings {
   enableAudioAlerts: boolean;
   enableBrowserNotifications: boolean;
-  defaultReminderMinutes: number; // 0 (exact time), 15, 30, 60
-  soundTheme: 'gentle' | 'chime' | 'digital';
+  enableVibration?: boolean;
+  defaultReminderMinutes: number; // 0 (exact time), 5, 10, 15, 30, 60
+  defaultAlarmSound: AlarmSoundType;
+  soundTheme?: 'gentle' | 'chime' | 'digital';
 }
 
 export interface User {
@@ -69,4 +75,14 @@ export interface AppNotification {
   type: NotificationType;
   timestamp: string;
   read: boolean;
+}
+
+export interface ActiveAlarm {
+  task: Task;
+  type: 'reminder' | 'due' | 'snooze' | 'test';
+  title: string;
+  message: string;
+  minutesBefore?: number;
+  sound: AlarmSoundType;
+  startedAt: number;
 }
