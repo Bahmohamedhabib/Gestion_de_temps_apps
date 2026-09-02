@@ -1,0 +1,72 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with alarm settings and preferences",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "avatarColor": { "type": "string" },
+        "role": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "settings": { "type": "object" }
+      },
+      "required": ["id", "name", "email", "createdAt"]
+    },
+    "Task": {
+      "title": "Task",
+      "description": "Task item with real-time multi-device sync, alarm sound, and sharing permissions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "completed": { "type": "boolean" },
+        "dueDate": { "type": "string" },
+        "dueTime": { "type": "string" },
+        "priority": { "type": "string" },
+        "category": { "type": "string" },
+        "subtasks": { "type": "array" },
+        "sharedWith": { "type": "array", "items": { "type": "string" } },
+        "sharedWithEmails": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string" },
+        "reminder": { "type": "boolean" },
+        "reminderMinutesBefore": { "type": "number" },
+        "alarmSound": { "type": "string" }
+      },
+      "required": ["id", "userId", "title", "dueDate", "completed", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "In-app reminder and activity alerts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["id", "userId", "title", "message", "type", "timestamp", "read"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile document accessible by the authenticated user"
+    },
+    "/tasks/{taskId}": {
+      "schema": "Task",
+      "description": "Tasks created by users or shared with collaborators across devices"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Notifications targeted to specific users"
+    }
+  }
+}

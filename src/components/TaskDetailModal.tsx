@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   X,
@@ -11,11 +11,17 @@ import {
   Share2,
   Tag,
   Check,
+  Users,
+  UserPlus,
+  Send,
+  Loader2,
 } from 'lucide-react';
 import { Task } from '../types';
 import { CATEGORIES } from '../data/defaultTasks';
 import { CategoryIcon } from './CategoryIcon';
 import { formatFrenchDate, getRelativeDateBadge } from '../utils/dateUtils';
+import { cloudDb } from '../lib/firebase';
+import { soundManager } from '../utils/audio';
 
 interface Props {
   task: Task | null;
@@ -25,6 +31,7 @@ interface Props {
   onToggleSubtask: (taskId: string, subtaskId: string) => void;
   onEdit: (task: Task) => void;
   onDelete: (taskId: string) => void;
+  onTaskUpdated?: (task: Task) => void;
 }
 
 export const TaskDetailModal: React.FC<Props> = ({
@@ -35,7 +42,12 @@ export const TaskDetailModal: React.FC<Props> = ({
   onToggleSubtask,
   onEdit,
   onDelete,
+  onTaskUpdated,
 }) => {
+  const [shareEmail, setShareEmail] = useState('');
+  const [isSharing, setIsSharing] = useState(false);
+  const [shareMessage, setShareMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
   if (!isOpen || !task) return null;
 
   const category = CATEGORIES[task.category] || CATEGORIES.work;
@@ -47,6 +59,42 @@ export const TaskDetailModal: React.FC<Props> = ({
     medium: { text: 'Moyenne', color: 'text-amber-600 bg-amber-50 border-amber-200' },
     low: { text: 'Basse', color: 'text-slate-600 bg-slate-50 border-slate-200' },
   }[task.priority];
+
+  const handleShareTask = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!shareEmail.trim()) return;
+
+    setIsSharing(true);
+    setShareMessage(null);
+    try {
+      const res = await cloudDb.shareTask(task.id, shareEmail.trim());
+      if (res.success) {
+        soundManager.playCreationChime();
+        setShareMessage({ text: res.message, type: 'success' });
+        const updatedEmails = [...(task.sharedWithEmails || []), shareEmail.trim().toLowerCase()];
+        const updatedTask = { ...task, sharedWithEmails: updatedEmails };
+        if (onTaskUpdated) onTaskUpdated(updatedTask);
+        setShareEmail('');
+      } else {
+        setShareMessage({ text: res.message, type: 'error' });
+      }
+    } catch (err: any) {
+      setShareMessage({ text: err.message || 'Erreur lors du partage.', type: 'error' });
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  const handleUnshare = async (targetEmail: string) => {
+    try {
+      await cloudDb.unshareTask(task.id, targetEmail);
+      const updatedEmails = (task.sharedWithEmails || []).filter((e) => e.toLowerCase() !== targetEmail.toLowerCase());
+      const updatedTask = { ...task, sharedWithEmails: updatedEmails };
+      if (onTaskUpdated) onTaskUpdated(updatedTask);
+    } catch (err) {
+      console.error('Error unsharing task:', err);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -128,7 +176,7 @@ export const TaskDetailModal: React.FC<Props> = ({
               >
                 {task.completed && <Check size={16} strokeWidth={3} />}
               </button>
-              <div>
+              <div className="flex-1">
                 <h2
                   className={`text-lg font-bold tracking-tight leading-snug ${
                     task.completed ? 'line-through text-neutral-400' : 'text-neutral-900'
@@ -140,6 +188,12 @@ export const TaskDetailModal: React.FC<Props> = ({
                   <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full border ${priorityLabels.color}`}>
                     Priorité {priorityLabels.text}
                   </span>
+                  {task.creatorEmail && (
+                    <span className="text-[10px] text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200 font-medium flex items-center gap-1">
+                      <Users size={11} />
+                      <span>Partagée par {task.creatorName || task.creatorEmail}</span>
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -219,6 +273,85 @@ export const TaskDetailModal: React.FC<Props> = ({
                       <span className="flex-1 font-medium">{sub.title}</span>
                     </button>
                   ))}
+                </div>
+              )}
+            </div>
+
+            {/* Collaborative Sharing Section */}
+            <div className="p-4 bg-gradient-to-br from-indigo-50/70 via-indigo-50/30 to-purple-50/40 rounded-2xl border border-indigo-100/90 space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-extrabold text-indigo-950 flex items-center gap-1.5">
+                  <Users size={14} className="text-indigo-600" />
+                  <span>Partager cette tâche avec un proche ou collègue</span>
+                </h4>
+                <span className="text-[10px] font-bold text-indigo-600 bg-indigo-100/80 px-2 py-0.5 rounded-full">
+                  Cloud Direct
+                </span>
+              </div>
+
+              <p className="text-[11px] text-indigo-800/80">
+                La tâche sera synchronisée instantanément en temps réel sur leurs écrans.
+              </p>
+
+              <form onSubmit={handleShareTask} className="flex items-center gap-2">
+                <input
+                  type="email"
+                  placeholder="email.du.collaborateur@exemple.com"
+                  value={shareEmail}
+                  onChange={(e) => setShareEmail(e.target.value)}
+                  className="flex-1 px-3 py-2 bg-white border border-indigo-200 rounded-xl text-xs text-neutral-800 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-2xs font-medium"
+                />
+                <button
+                  type="submit"
+                  disabled={isSharing || !shareEmail.trim()}
+                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                >
+                  {isSharing ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <>
+                      <Send size={12} />
+                      <span>Partager</span>
+                    </>
+                  )}
+                </button>
+              </form>
+
+              {shareMessage && (
+                <div
+                  className={`p-2 rounded-xl text-[11px] font-medium flex items-center gap-1.5 ${
+                    shareMessage.type === 'success'
+                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                      : 'bg-rose-50 text-rose-700 border border-rose-200'
+                  }`}
+                >
+                  <span>{shareMessage.text}</span>
+                </div>
+              )}
+
+              {/* Shared with List */}
+              {task.sharedWithEmails && task.sharedWithEmails.length > 0 && (
+                <div className="pt-2 border-t border-indigo-100/80">
+                  <div className="text-[10px] font-bold text-indigo-900 uppercase tracking-wider mb-1.5">
+                    Accès partagé avec ({task.sharedWithEmails.length}) :
+                  </div>
+                  <div className="space-y-1.5">
+                    {task.sharedWithEmails.map((email) => (
+                      <div
+                        key={email}
+                        className="flex items-center justify-between p-2 bg-white rounded-xl border border-indigo-100 text-xs text-neutral-800"
+                      >
+                        <span className="font-medium truncate">{email}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleUnshare(email)}
+                          className="text-[10px] text-rose-600 hover:text-rose-800 font-bold hover:underline cursor-pointer"
+                        >
+                          Retirer
+                        </button>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

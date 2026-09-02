@@ -35,6 +35,10 @@ export interface Task {
   reminderMinutesBefore?: number; // e.g. 0, 5, 10, 15, 30, 60
   alarmSound?: AlarmSoundType;
   snoozedUntil?: number; // Timestamp in ms
+  sharedWith?: string[]; // user IDs with whom task is shared
+  sharedWithEmails?: string[]; // email addresses with whom task is shared
+  creatorEmail?: string;
+  creatorName?: string;
 }
 
 export type TabType = 'tasks' | 'calendar' | 'stats' | 'settings';
@@ -60,6 +64,7 @@ export interface User {
   avatarColor: string;
   role?: string;
   createdAt: string;
+  emailVerified?: boolean;
   settings: UserSettings;
 }
 

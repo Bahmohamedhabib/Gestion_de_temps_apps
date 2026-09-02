@@ -11,6 +11,7 @@ import {
   Edit2,
   ChevronRight,
   ListOrdered,
+  Users,
 } from 'lucide-react';
 import { Task } from '../types';
 import { CATEGORIES } from '../data/defaultTasks';
@@ -192,6 +193,15 @@ export const TaskCard: React.FC<Props> = ({
                       {task.dueTime}
                     </span>
                   )}
+                </span>
+              )}
+              {/* Shared badge if collaborative */}
+              {((task.sharedWithEmails && task.sharedWithEmails.length > 0) || task.creatorEmail) && (
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-50 text-purple-700 border border-purple-200">
+                  <Users size={11} />
+                  <span>
+                    {task.creatorEmail ? `De ${task.creatorName || task.creatorEmail}` : `Partagé (${task.sharedWithEmails?.length})`}
+                  </span>
                 </span>
               )}
             </div>

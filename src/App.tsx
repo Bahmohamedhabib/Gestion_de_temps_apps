@@ -8,6 +8,8 @@ import {
 import { Task, TabType, User, AppNotification, UserSettings, ActiveAlarm, AlarmSoundType } from './types';
 import { getTodayDateString } from './data/defaultTasks';
 import { authStorage } from './utils/authStorage';
+import { auth, cloudDb } from './lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import { soundManager } from './utils/audio';
 import {
   checkTaskReminders,
@@ -35,7 +37,7 @@ import { AuthScreen } from './components/AuthScreen';
 import { AlarmRingingModal } from './components/AlarmRingingModal';
 
 export default function App() {
-  // Current user state (strictly private account)
+  // Current user state (Cloud Firebase Auth + local cache)
   const [currentUser, setCurrentUser] = useState<User | null>(() => authStorage.getCurrentUser());
 
   // User-specific tasks state
@@ -70,6 +72,60 @@ export default function App() {
   useEffect(() => {
     initServiceWorker();
   }, []);
+
+  // Sync Firebase Auth session with local state on load
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (fbUser) => {
+      if (fbUser) {
+        const cloudProfile = await cloudDb.getUserProfile(fbUser.uid);
+        if (cloudProfile) {
+          setCurrentUser(cloudProfile);
+          authStorage.setCurrentUser(cloudProfile.id);
+        }
+      }
+    });
+    return () => unsub();
+  }, []);
+
+  // Firebase Real-Time Synchronization for Tasks and Notifications
+  useEffect(() => {
+    if (!currentUser) return;
+
+    // 1. Subscribe to real-time Tasks in Firestore (Owned + Shared with user)
+    const unsubscribeTasks = cloudDb.subscribeUserTasks(
+      currentUser.id,
+      currentUser.email,
+      (cloudTasks) => {
+        if (cloudTasks && cloudTasks.length > 0) {
+          setTasks(cloudTasks);
+          authStorage.saveUserTasks(currentUser.id, cloudTasks);
+        } else {
+          // If no cloud tasks yet, sync initial local tasks to Firestore
+          const localTasks = authStorage.getUserTasks(currentUser.id);
+          if (localTasks.length > 0) {
+            localTasks.forEach((t) => {
+              cloudDb.saveTask({ ...t, userId: currentUser.id, creatorEmail: currentUser.email, creatorName: currentUser.name });
+            });
+          }
+        }
+      }
+    );
+
+    // 2. Subscribe to real-time Notifications in Firestore
+    const unsubscribeNotifs = cloudDb.subscribeUserNotifications(
+      currentUser.id,
+      (cloudNotifs) => {
+        if (cloudNotifs && cloudNotifs.length > 0) {
+          setNotifications(cloudNotifs);
+        }
+      }
+    );
+
+    return () => {
+      unsubscribeTasks();
+      unsubscribeNotifs();
+    };
+  }, [currentUser?.id, currentUser?.email]);
 
   // Listen for messages from background Service Worker (e.g. notifications clicked or background alarms)
   useEffect(() => {
@@ -131,9 +187,14 @@ export default function App() {
   };
 
   // Handle user logout
-  const handleLogout = () => {
+  const handleLogout = async () => {
     soundManager.stopAlarm();
     setActiveAlarm(null);
+    try {
+      await cloudDb.signOut();
+    } catch (e) {
+      console.warn('Firebase signout error:', e);
+    }
     authStorage.logout();
     setCurrentUser(null);
     setTasks([]);
@@ -143,7 +204,7 @@ export default function App() {
   };
 
   // Update user profile or settings
-  const handleUpdateUserSettings = (newSettings: Partial<UserSettings>) => {
+  const handleUpdateUserSettings = async (newSettings: Partial<UserSettings>) => {
     if (!currentUser) return;
     const updated = authStorage.updateUserProfile(currentUser.id, {
       settings: {
@@ -153,6 +214,11 @@ export default function App() {
     });
     if (updated) {
       setCurrentUser(updated);
+      try {
+        await cloudDb.updateUserProfile(currentUser.id, updated);
+      } catch (err) {
+        console.warn('Failed to sync profile to cloud:', err);
+      }
     }
   };
 
@@ -179,6 +245,7 @@ export default function App() {
         (newAlert) => {
           setNotifications((prev) => [newAlert, ...prev]);
           setActiveAlert(newAlert);
+          cloudDb.addNotification(newAlert).catch(() => {});
         },
         (ringingAlarm) => {
           setActiveAlarm(ringingAlarm);
@@ -202,9 +269,14 @@ export default function App() {
     if (activeAlarm?.task && currentUser) {
       const snoozeUntil = Date.now() + minutes * 60 * 1000;
       setTasks((prev) =>
-        prev.map((t) =>
-          t.id === activeAlarm.task.id ? { ...t, snoozedUntil: snoozeUntil } : t
-        )
+        prev.map((t) => {
+          if (t.id === activeAlarm.task.id) {
+            const updated = { ...t, snoozedUntil: snoozeUntil };
+            cloudDb.saveTask(updated).catch(() => {});
+            return updated;
+          }
+          return t;
+        })
       );
 
       const snoozeNotif = authStorage.addNotification(currentUser.id, {
@@ -216,6 +288,7 @@ export default function App() {
       });
       setNotifications((prev) => [snoozeNotif, ...prev]);
       setActiveAlert(snoozeNotif);
+      cloudDb.addNotification(snoozeNotif).catch(() => {});
     }
     setActiveAlarm(null);
   };
@@ -228,7 +301,7 @@ export default function App() {
   };
 
   // Handlers for tasks
-  const handleToggleComplete = (taskId: string) => {
+  const handleToggleComplete = async (taskId: string) => {
     if (!currentUser) return;
 
     // If task was ringing, silence it
@@ -236,80 +309,105 @@ export default function App() {
       handleStopAlarm();
     }
 
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id === taskId) {
-          const willBeCompleted = !t.completed;
-          if (willBeCompleted) {
-            if (currentUser.settings?.enableAudioAlerts) {
-              soundManager.playCompletionChime();
-            }
-            // Add notification
-            const notif = authStorage.addNotification(currentUser.id, {
-              taskId: t.id,
-              taskTitle: t.title,
-              title: 'Tâche terminée ! 🎉',
-              message: `Félicitations pour avoir accompli : « ${t.title} »`,
-              type: 'completed',
-            });
-            setNotifications((prevN) => [notif, ...prevN]);
-            setActiveAlert(notif);
+    let targetTask: Task | undefined;
+    const updatedTasks = tasks.map((t) => {
+      if (t.id === taskId) {
+        const willBeCompleted = !t.completed;
+        if (willBeCompleted) {
+          if (currentUser.settings?.enableAudioAlerts) {
+            soundManager.playCompletionChime();
           }
-
-          return {
-            ...t,
-            completed: willBeCompleted,
-            completedAt: willBeCompleted ? new Date().toISOString() : undefined,
-            subtasks: t.subtasks.map((s) => ({
-              ...s,
-              completed: willBeCompleted ? true : s.completed,
-            })),
-          };
+          // Add notification
+          const notif = authStorage.addNotification(currentUser.id, {
+            taskId: t.id,
+            taskTitle: t.title,
+            title: 'Tâche terminée ! 🎉',
+            message: `Félicitations pour avoir accompli : « ${t.title} »`,
+            type: 'completed',
+          });
+          setNotifications((prevN) => [notif, ...prevN]);
+          setActiveAlert(notif);
+          cloudDb.addNotification(notif).catch(() => {});
         }
-        return t;
-      })
-    );
+
+        targetTask = {
+          ...t,
+          completed: willBeCompleted,
+          completedAt: willBeCompleted ? new Date().toISOString() : undefined,
+          subtasks: t.subtasks.map((s) => ({
+            ...s,
+            completed: willBeCompleted ? true : s.completed,
+          })),
+        };
+        return targetTask;
+      }
+      return t;
+    });
+
+    setTasks(updatedTasks);
+    if (targetTask) {
+      try {
+        await cloudDb.saveTask(targetTask);
+      } catch (err) {
+        console.warn('Failed to sync completed task to cloud:', err);
+      }
+    }
   };
 
-  const handleToggleSubtask = (taskId: string, subtaskId: string) => {
-    setTasks((prev) =>
-      prev.map((t) => {
-        if (t.id === taskId) {
-          const updatedSubtasks = t.subtasks.map((s) =>
-            s.id === subtaskId ? { ...s, completed: !s.completed } : s
-          );
-          const allCompleted =
-            updatedSubtasks.length > 0 &&
-            updatedSubtasks.every((s) => s.completed);
+  const handleToggleSubtask = async (taskId: string, subtaskId: string) => {
+    let targetTask: Task | undefined;
+    const updatedTasks = tasks.map((t) => {
+      if (t.id === taskId) {
+        const updatedSubtasks = t.subtasks.map((s) =>
+          s.id === subtaskId ? { ...s, completed: !s.completed } : s
+        );
+        const allCompleted =
+          updatedSubtasks.length > 0 &&
+          updatedSubtasks.every((s) => s.completed);
 
-          return {
-            ...t,
-            subtasks: updatedSubtasks,
-            completed: allCompleted ? true : t.completed,
-          };
-        }
-        return t;
-      })
-    );
+        targetTask = {
+          ...t,
+          subtasks: updatedSubtasks,
+          completed: allCompleted ? true : t.completed,
+        };
+        return targetTask;
+      }
+      return t;
+    });
+
+    setTasks(updatedTasks);
+    if (targetTask) {
+      try {
+        await cloudDb.saveTask(targetTask);
+      } catch (err) {
+        console.warn('Failed to sync subtask to cloud:', err);
+      }
+    }
   };
 
-  const handleSaveTask = (
+  const handleSaveTask = async (
     taskData: Omit<Task, 'id' | 'createdAt' | 'completed'> & { id?: string }
   ) => {
     if (!currentUser) return;
 
     if (taskData.id) {
       // Edit existing
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === taskData.id
-            ? {
-                ...t,
-                ...taskData,
-              }
-            : t
-        )
-      );
+      const existing = tasks.find((t) => t.id === taskData.id);
+      const updated: Task = {
+        ...(existing || ({} as Task)),
+        ...taskData,
+        id: taskData.id,
+        userId: existing?.userId || currentUser.id,
+        createdAt: existing?.createdAt || new Date().toISOString(),
+        completed: existing?.completed || false,
+      };
+
+      setTasks((prev) => prev.map((t) => (t.id === taskData.id ? updated : t)));
+      try {
+        await cloudDb.saveTask(updated);
+      } catch (err) {
+        console.warn('Failed to update task in cloud:', err);
+      }
 
       const notif = authStorage.addNotification(currentUser.id, {
         taskId: taskData.id,
@@ -319,11 +417,14 @@ export default function App() {
         type: 'info',
       });
       setNotifications((prevN) => [notif, ...prevN]);
+      cloudDb.addNotification(notif).catch(() => {});
     } else {
       // Create new
       const newTask: Task = {
         id: 'task-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
         userId: currentUser.id,
+        creatorEmail: currentUser.email,
+        creatorName: currentUser.name,
         title: taskData.title,
         description: taskData.description,
         category: taskData.category,
@@ -334,11 +435,18 @@ export default function App() {
         reminderMinutesBefore: taskData.reminderMinutesBefore,
         alarmSound: taskData.alarmSound || currentUser.settings?.defaultAlarmSound || 'digital',
         subtasks: taskData.subtasks || [],
+        sharedWith: [],
+        sharedWithEmails: [],
         completed: false,
         createdAt: new Date().toISOString(),
       };
 
       setTasks((prev) => [newTask, ...prev]);
+      try {
+        await cloudDb.saveTask(newTask);
+      } catch (err) {
+        console.warn('Failed to save task in cloud:', err);
+      }
 
       // Audio feedback
       if (currentUser.settings?.enableAudioAlerts) {
@@ -366,17 +474,23 @@ export default function App() {
 
       setNotifications((prevN) => [notif, ...prevN]);
       setActiveAlert(notif);
+      cloudDb.addNotification(notif).catch(() => {});
     }
     setEditingTask(null);
   };
 
-  const handleDeleteTask = (taskId: string) => {
+  const handleDeleteTask = async (taskId: string) => {
     if (activeAlarm?.taskId === taskId) {
       handleStopAlarm();
     }
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
     if (selectedDetailTask?.id === taskId) {
       setSelectedDetailTask(null);
+    }
+    try {
+      await cloudDb.deleteTask(taskId);
+    } catch (err) {
+      console.warn('Failed to delete task from cloud:', err);
     }
   };
 
@@ -411,11 +525,18 @@ export default function App() {
   };
 
   const handleClearCompleted = () => {
+    const completedIds = tasks.filter((t) => t.completed).map((t) => t.id);
     setTasks((prev) => prev.filter((t) => !t.completed));
+    completedIds.forEach((id) => cloudDb.deleteTask(id).catch(() => {}));
   };
 
   const handleImportTasks = (importedTasks: Task[]) => {
     setTasks(importedTasks);
+    if (currentUser) {
+      importedTasks.forEach((t) => {
+        cloudDb.saveTask({ ...t, userId: currentUser.id }).catch(() => {});
+      });
+    }
   };
 
   const handleMarkAllNotifsRead = () => {
@@ -611,6 +732,10 @@ export default function App() {
         onToggleSubtask={handleToggleSubtask}
         onEdit={handleOpenEdit}
         onDelete={handleDeleteTask}
+        onTaskUpdated={(updated) => {
+          setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+          setSelectedDetailTask(updated);
+        }}
       />
 
       {/* PWA Mobile Installation Guide Modal */}

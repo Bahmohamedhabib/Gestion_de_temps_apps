@@ -20,6 +20,9 @@ import {
   Vibrate,
   Clock,
   Radio,
+  Cloud,
+  Users,
+  RefreshCw,
 } from 'lucide-react';
 import { Task, User, UserSettings, AlarmSoundType } from '../types';
 import { soundManager } from '../utils/audio';
@@ -148,6 +151,54 @@ export const SettingsView: React.FC<Props> = ({
         )}
       </div>
 
+      {/* Cloud Database & Sync Status Card */}
+      <div className="bg-gradient-to-br from-indigo-950 via-slate-900 to-indigo-900 text-white rounded-3xl p-5 shadow-sm space-y-4 border border-indigo-800/40">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-indigo-600/50 rounded-xl text-indigo-200 border border-indigo-400/30">
+              <Cloud size={18} />
+            </div>
+            <div>
+              <h3 className="text-sm font-black">Base Cloud Firestore (Temps Réel)</h3>
+              <p className="text-[11px] text-indigo-200">Synchronisation active multi-appareils</p>
+            </div>
+          </div>
+          <span className="px-2.5 py-1 bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-[10px] font-extrabold rounded-full flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span>Connecté</span>
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+          <div className="p-3 rounded-2xl bg-white/5 border border-white/10 space-y-1">
+            <div className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1">
+              <Smartphone size={12} /> PC & Smartphone
+            </div>
+            <p className="text-[11px] text-neutral-200 font-medium">
+              Vos modifications sur PC apparaissent instantanément sur mobile.
+            </p>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-white/5 border border-white/10 space-y-1">
+            <div className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1">
+              <Users size={12} /> Partage d'équipe
+            </div>
+            <p className="text-[11px] text-neutral-200 font-medium">
+              Partagez n'importe quelle tâche via l'email de vos collègues/proches.
+            </p>
+          </div>
+
+          <div className="p-3 rounded-2xl bg-white/5 border border-white/10 space-y-1">
+            <div className="text-[10px] font-bold text-indigo-300 uppercase tracking-wider flex items-center gap-1">
+              <ShieldCheck size={12} /> Sécurisé & Gratuit
+            </div>
+            <p className="text-[11px] text-neutral-200 font-medium">
+              Règles de sécurité Firestore garantissant la confidentialité des données.
+            </p>
+          </div>
+        </div>
+      </div>
+
       {/* Current User Card */}
       <div className="bg-white rounded-3xl p-5 border border-neutral-200/90 shadow-xs space-y-3">
         <div className="flex items-center justify-between">
@@ -168,7 +219,7 @@ export const SettingsView: React.FC<Props> = ({
                   {currentUser.name}
                 </h3>
                 <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-md">
-                  Compte Privé
+                  Compte Cloud
                 </span>
               </div>
               <p className="text-xs text-neutral-500">{currentUser.email}</p>
