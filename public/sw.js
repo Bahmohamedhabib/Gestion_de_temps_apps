@@ -23,6 +23,7 @@ setInterval(() => {
         tag: `alarm-${alarm.taskId}-${alarm.alarmType}`,
         renotify: true,
         requireInteraction: true,
+        silent: false,
         vibrate: [800, 200, 800, 200, 800, 200, 1000],
         data: {
           taskId: alarm.taskId,

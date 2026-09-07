@@ -17,6 +17,7 @@ import {
   initServiceWorker,
   syncAlarmsToServiceWorker,
   triggerTestAlarm,
+  startAlarmHeartbeat,
 } from './utils/reminderEngine';
 
 // Components
@@ -234,7 +235,7 @@ export default function App() {
     }
   }, [tasks]);
 
-  // High-precision deadline & alarm checker (runs every 1.5 seconds)
+  // High-precision deadline & alarm checker with Web Worker heartbeat & mobile screen wake-up listeners
   useEffect(() => {
     if (!currentUser) return;
 
@@ -253,9 +254,28 @@ export default function App() {
       );
     };
 
+    // Run check immediately
     runChecker();
-    const interval = setInterval(runChecker, 1500);
-    return () => clearInterval(interval);
+
+    // Start background Web Worker ticker to survive smartphone screen dimming
+    const stopHeartbeat = startAlarmHeartbeat(runChecker);
+
+    // Instant trigger when phone wakes up, screen becomes visible or window gains focus
+    const handleWakeup = () => {
+      soundManager.unlockAudioNow();
+      runChecker();
+    };
+
+    document.addEventListener('visibilitychange', handleWakeup);
+    window.addEventListener('focus', handleWakeup);
+    window.addEventListener('pageshow', handleWakeup);
+
+    return () => {
+      stopHeartbeat();
+      document.removeEventListener('visibilitychange', handleWakeup);
+      window.removeEventListener('focus', handleWakeup);
+      window.removeEventListener('pageshow', handleWakeup);
+    };
   }, [tasks, currentUser]);
 
   // Handlers for Stopping and Snoozing Continuous Alarms
@@ -680,6 +700,8 @@ export default function App() {
               <SettingsView
                 tasks={tasks}
                 currentUser={currentUser}
+                activeAlarm={activeAlarm}
+                onStopAlarm={handleStopAlarm}
                 onResetTasks={handleResetTasks}
                 onClearCompleted={handleClearCompleted}
                 onImportTasks={handleImportTasks}
@@ -709,6 +731,12 @@ export default function App() {
         activeAlarm={activeAlarm}
         onStopAlarm={handleStopAlarm}
         onSnooze={handleSnoozeAlarm}
+        onCompleteTask={(taskId) => {
+          const task = tasks.find((t) => t.id === taskId);
+          if (task && !task.completed) {
+            handleToggleComplete(taskId);
+          }
+        }}
       />
 
       {/* Task Creation & Edit Modal */}

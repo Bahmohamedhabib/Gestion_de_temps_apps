@@ -141,7 +141,7 @@ export function syncAlarmsToServiceWorker(tasks: Task[], user: User) {
   });
 }
 
-// High-precision Alarm Checker
+// High-precision Alarm Checker with Mobile Phone Wakeup & Catch-up Window
 export function checkTaskReminders(
   tasks: Task[],
   user: User,
@@ -151,12 +151,14 @@ export function checkTaskReminders(
   if (!tasks || tasks.length === 0 || !user) return;
 
   const now = Date.now();
+  // 120 minutes (2 hours) catch-up window so phones waking from sleep never miss due alarms
+  const CATCH_UP_WINDOW_MS = 120 * 60 * 1000;
 
   tasks.forEach((task) => {
     if (task.completed) return;
 
     // Check snoozed alarms
-    if (task.snoozedUntil && task.snoozedUntil <= now && task.snoozedUntil >= now - 60000) {
+    if (task.snoozedUntil && task.snoozedUntil <= now && now < task.snoozedUntil + CATCH_UP_WINDOW_MS) {
       const snoozeKey = `alarm_snooze_fired_${task.id}_${task.snoozedUntil}`;
       if (!localStorage.getItem(snoozeKey)) {
         localStorage.setItem(snoozeKey, 'true');
@@ -215,10 +217,10 @@ export function checkTaskReminders(
     const sound = task.alarmSound || user.settings?.defaultAlarmSound || 'digital';
 
     // 1. Approaching Reminder Alarm (e.g. 15 minutes before)
+    // Trigger if we are at or past the reminder time AND not yet past the due time
     if (reminderLead > 0) {
       const reminderTimestamp = dueTimestamp - reminderLead * 60 * 1000;
-      // Trigger if we are at or past the reminder time, within a 90 second window
-      if (now >= reminderTimestamp && now < reminderTimestamp + 90000) {
+      if (now >= reminderTimestamp && now < dueTimestamp) {
         const reminderKey = `alarm_reminder_fired_${user.id}_${task.id}_${task.dueDate}_${task.dueTime}_${reminderLead}`;
         if (!localStorage.getItem(reminderKey)) {
           localStorage.setItem(reminderKey, 'true');
@@ -264,13 +266,22 @@ export function checkTaskReminders(
     }
 
     // 2. Exact Due Time Alarm
-    if (now >= dueTimestamp && now < dueTimestamp + 90000) {
+    // Generous catch-up window of up to 2 hours so that if the phone was locked/sleeping,
+    // the user is immediately alerted the moment they unlock or open the screen!
+    if (now >= dueTimestamp && now < dueTimestamp + CATCH_UP_WINDOW_MS) {
       const dueKey = `alarm_due_fired_${user.id}_${task.id}_${task.dueDate}_${task.dueTime}`;
       if (!localStorage.getItem(dueKey)) {
         localStorage.setItem(dueKey, 'true');
 
-        const title = `🚨 C'EST L'HEURE DE VOTRE TÂCHE !`;
-        const message = `« ${task.title} » commence maintenant (${task.dueTime}).`;
+        const delayMinutes = Math.floor((now - dueTimestamp) / 60000);
+        const isLate = delayMinutes >= 2;
+
+        const title = isLate
+          ? `🚨 ALARME (En retard de ${delayMinutes} min)`
+          : `🚨 C'EST L'HEURE DE VOTRE TÂCHE !`;
+        const message = isLate
+          ? `« ${task.title} » était prévue à ${task.dueTime} !`
+          : `« ${task.title} » commence maintenant (${task.dueTime}).`;
 
         if (user.settings?.enableAudioAlerts) {
           soundManager.startAlarm(sound, user.settings?.enableVibration ?? true);
@@ -346,5 +357,55 @@ export function triggerTestAlarm(
     sound,
     startedAt: Date.now(),
   });
+}
+
+/**
+ * Creates an inline Web Worker ticker that resists mobile browser background throttling.
+ * This ensures alarms are checked every second even when the phone screen is dimmed.
+ */
+export function startAlarmHeartbeat(onTick: () => void): () => void {
+  if (typeof window === 'undefined') return () => {};
+
+  let worker: Worker | null = null;
+  let fallbackInterval: number | null = null;
+
+  try {
+    const blob = new Blob([
+      `let timer = null;
+       self.onmessage = function(e) {
+         if (e.data === 'start') {
+           if (!timer) {
+             timer = setInterval(function() {
+               self.postMessage('tick');
+             }, 1000);
+           }
+         } else if (e.data === 'stop') {
+           if (timer) {
+             clearInterval(timer);
+             timer = null;
+           }
+         }
+       };`
+    ], { type: 'application/javascript' });
+
+    const workerUrl = URL.createObjectURL(blob);
+    worker = new Worker(workerUrl);
+    worker.onmessage = () => {
+      onTick();
+    };
+    worker.postMessage('start');
+  } catch (e) {
+    fallbackInterval = window.setInterval(onTick, 1200);
+  }
+
+  return () => {
+    if (worker) {
+      worker.postMessage('stop');
+      worker.terminate();
+    }
+    if (fallbackInterval !== null) {
+      clearInterval(fallbackInterval);
+    }
+  };
 }
 

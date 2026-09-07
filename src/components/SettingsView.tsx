@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import {
   Trash2,
   RotateCcw,
@@ -23,14 +23,18 @@ import {
   Cloud,
   Users,
   RefreshCw,
+  AlertOctagon,
+  Square,
 } from 'lucide-react';
-import { Task, User, UserSettings, AlarmSoundType } from '../types';
+import { Task, User, UserSettings, AlarmSoundType, ActiveAlarm } from '../types';
 import { soundManager } from '../utils/audio';
 import { requestNotificationPermission, sendBrowserNotification, triggerTestAlarm } from '../utils/reminderEngine';
 
 interface Props {
   tasks: Task[];
   currentUser: User;
+  activeAlarm?: ActiveAlarm | null;
+  onStopAlarm?: () => void;
   onResetTasks: () => void;
   onClearCompleted: () => void;
   onImportTasks: (tasks: Task[]) => void;
@@ -59,6 +63,8 @@ const REMINDER_LEAD_OPTIONS = [
 export const SettingsView: React.FC<Props> = ({
   tasks,
   currentUser,
+  activeAlarm,
+  onStopAlarm,
   onResetTasks,
   onClearCompleted,
   onImportTasks,
@@ -73,11 +79,32 @@ export const SettingsView: React.FC<Props> = ({
     typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default'
   );
 
+  // Live subscription to SoundManager state
+  const [isAudioRinging, setIsAudioRinging] = useState<boolean>(() => soundManager.isRinging);
+  const [previewSound, setPreviewSound] = useState<AlarmSoundType | null>(() => soundManager.previewingSound);
+
+  useEffect(() => {
+    return soundManager.subscribe(() => {
+      setIsAudioRinging(soundManager.isRinging);
+      setPreviewSound(soundManager.previewingSound);
+    });
+  }, []);
+
+  const isAlarmActive = Boolean(activeAlarm || isAudioRinging);
+
   const completedCount = tasks.filter((t) => t.completed).length;
 
   const showFeedback = (msg: string) => {
     setSuccessMessage(msg);
     setTimeout(() => setSuccessMessage(''), 3500);
+  };
+
+  const handleStopAnyAlarm = () => {
+    soundManager.stopAlarm();
+    if (onStopAlarm) {
+      onStopAlarm();
+    }
+    showFeedback("L'alarme a été arrêtée avec succès !");
   };
 
   const handleExport = () => {
@@ -149,6 +176,100 @@ export const SettingsView: React.FC<Props> = ({
             <span>{successMessage}</span>
           </div>
         )}
+      </div>
+
+      {/* Mobile Smartphone Diagnostic & Readiness Card */}
+      <div className="bg-white rounded-3xl p-5 border border-neutral-200/90 shadow-xs space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-gradient-to-tr from-amber-500 to-orange-500 text-white rounded-xl shadow-xs">
+              <Smartphone size={18} />
+            </div>
+            <div>
+              <h3 className="text-sm font-extrabold text-neutral-900">
+                Diagnostic Spécial Téléphones Portables
+              </h3>
+              <p className="text-xs text-neutral-500">
+                Optimisations spécifiques Android & iPhone / Safari
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200/80">
+            <span className="text-[10px] uppercase font-bold text-neutral-400 block mb-1">
+              Moteur Audio Mobile
+            </span>
+            <div className="flex items-center gap-1.5 font-bold text-neutral-800">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping" />
+              <span>Double Flux WAV + Synth</span>
+            </div>
+            <p className="text-[10px] text-neutral-500 mt-1">
+              Prêt pour haut-parleurs smartphone
+            </p>
+          </div>
+
+          <div className="p-3 bg-neutral-50 rounded-2xl border border-neutral-200/80">
+            <span className="text-[10px] uppercase font-bold text-neutral-400 block mb-1">
+              Maintien Écran Allumé
+            </span>
+            <div className="flex items-center gap-1.5 font-bold text-neutral-800">
+              <span className={`w-2 h-2 rounded-full ${soundManager.isWakeLockSupported ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+              <span>{soundManager.isWakeLockSupported ? 'Wake Lock Actif' : 'Non supporté'}</span>
+            </div>
+            <p className="text-[10px] text-neutral-500 mt-1">
+              Garde l'écran allumé pendant l'alarme
+            </p>
+          </div>
+        </div>
+
+        {/* 4 Essential Mobile Rules for Alarms */}
+        <div className="p-4 bg-amber-50/70 border border-amber-200/80 rounded-2xl space-y-2 text-amber-950">
+          <h4 className="text-xs font-black flex items-center gap-1.5 text-amber-900">
+            <AlertOctagon size={14} className="text-amber-600" />
+            <span>4 conseils essentiels pour que l'alarme sonne fort sur votre téléphone :</span>
+          </h4>
+          <ul className="text-[11px] space-y-1.5 list-disc pl-4 text-amber-900/90 leading-relaxed font-medium">
+            <li>
+              <strong>Bouton silencieux physique :</strong> Sur iPhone ou Android, vérifiez que le commutateur latéral de sonnerie n'est pas sur Silencieux / Vibreur seul.
+            </li>
+            <li>
+              <strong>Volume multimédia :</strong> Augmentez le volume des médias / haut-parleur dans les paramètres audio de votre téléphone.
+            </li>
+            <li>
+              <strong>Écran de veille & réveil :</strong> L'application dispose désormais d'une tolérance de rattrapage de 2 heures : dès que vous touchez votre téléphone, toute alarme due sonne instantanément.
+            </li>
+            <li>
+              <strong>Ajouter à l'écran d'accueil :</strong> Installez l'application en PWA via le menu Partager (iOS) ou Installer (Android) pour garantir la persistance des notifications d'arrière-plan.
+            </li>
+          </ul>
+
+          {isAlarmActive ? (
+            <button
+              type="button"
+              id="btn-mobile-stop-alarm-settings"
+              onClick={handleStopAnyAlarm}
+              className="mt-2 w-full py-3 bg-red-600 hover:bg-red-700 active:scale-95 text-white font-black text-xs rounded-xl shadow-lg flex items-center justify-center gap-2 cursor-pointer transition-all border-2 border-red-300 animate-pulse"
+            >
+              <VolumeX size={16} />
+              <span>ARRÊTER L'ALARME SUR CE TÉLÉPHONE (STOP)</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              id="btn-mobile-test-alarm-settings"
+              onClick={() => {
+                soundManager.unlockAudioNow();
+                onTriggerTestAlarm(currentSound);
+              }}
+              className="mt-2 w-full py-2.5 bg-amber-600 hover:bg-amber-700 active:scale-95 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+            >
+              <Volume2 size={14} />
+              <span>Débloquer l'audio & Tester l'alarme sur ce téléphone</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Cloud Database & Sync Status Card */}
@@ -254,30 +375,71 @@ export const SettingsView: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Live Test Alarm Trigger Button */}
-        <div className="p-4 rounded-2xl bg-gradient-to-br from-rose-50 via-red-50 to-orange-50 border border-rose-200 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-rose-950 flex items-center gap-1.5">
-              <Sparkles size={14} className="text-rose-600" />
-              <span>Tester le système d'alarme maintenant</span>
-            </span>
-            <span className="text-[10px] font-bold bg-rose-200/70 text-rose-900 px-2 py-0.5 rounded-full">
-              Temps réel
-            </span>
+        {/* Live Test Alarm Trigger Button & Instant Stop Controls */}
+        {isAlarmActive ? (
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-rose-600 to-red-700 text-white border-2 border-red-400 shadow-xl space-y-3 animate-pulse">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-black uppercase tracking-wider flex items-center gap-1.5">
+                <BellRing size={16} className="animate-spin" />
+                <span>Alarme de test active en cours de sonnerie !</span>
+              </span>
+              <span className="text-[10px] font-black bg-white text-rose-700 px-2 py-0.5 rounded-full">
+                Son & Vibreur
+              </span>
+            </div>
+            <p className="text-[11px] text-rose-100 leading-relaxed font-medium">
+              La sonnerie retentit en continu comme lors d'une vraie échéance.
+            </p>
+            <button
+              id="btn-stop-test-alarm"
+              type="button"
+              onClick={handleStopAnyAlarm}
+              className="w-full py-4 bg-white hover:bg-neutral-100 active:scale-95 text-rose-700 rounded-2xl text-xs font-black tracking-wider shadow-2xl transition-all cursor-pointer flex items-center justify-center gap-2 border-2 border-white/80"
+            >
+              <VolumeX size={18} />
+              <span>ARRÊTER L'ALARME DE TEST (STOP)</span>
+            </button>
           </div>
-          <p className="text-[11px] text-rose-800 leading-relaxed">
-            Déclenche la sonnerie continue et le panneau d'alarme plein écran avec boutons d'arrêt et de répétition (Snooze).
-          </p>
-          <button
-            id="btn-test-full-alarm"
-            type="button"
-            onClick={() => onTriggerTestAlarm(currentSound)}
-            className="w-full py-3 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 active:scale-[0.98] text-white rounded-xl text-xs font-black tracking-wide shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 border border-red-400/40"
-          >
-            <BellRing size={16} className="animate-bounce" />
-            <span>DÉCLENCHER L'ALARME EN DIRECT (TEST)</span>
-          </button>
-        </div>
+        ) : (
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-rose-50 via-red-50 to-orange-50 border border-rose-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-rose-950 flex items-center gap-1.5">
+                <Sparkles size={14} className="text-rose-600" />
+                <span>Tester le système d'alarme maintenant</span>
+              </span>
+              <span className="text-[10px] font-bold bg-rose-200/70 text-rose-900 px-2 py-0.5 rounded-full">
+                Temps réel
+              </span>
+            </div>
+            <p className="text-[11px] text-rose-800 leading-relaxed">
+              Déclenche la sonnerie continue et le panneau d'alarme plein écran avec boutons d'arrêt immédiat et de répétition.
+            </p>
+            <div className="flex gap-2">
+              <button
+                id="btn-test-full-alarm"
+                type="button"
+                onClick={() => onTriggerTestAlarm(currentSound)}
+                className="flex-1 py-3 bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 active:scale-[0.98] text-white rounded-xl text-xs font-black tracking-wide shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 border border-red-400/40"
+              >
+                <BellRing size={16} className="animate-bounce" />
+                <span>DÉCLENCHER L'ALARME EN DIRECT (TEST)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  soundManager.stopAllSounds();
+                  if (onStopAlarm) onStopAlarm();
+                  showFeedback("Tous les sons ont été coupés.");
+                }}
+                title="Couper tout son"
+                className="px-3 py-3 bg-white hover:bg-neutral-100 text-neutral-700 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center border border-neutral-200 shadow-xs"
+              >
+                <VolumeX size={16} />
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Default Sound Ringtone Selection */}
         <div className="space-y-2 pt-1">
@@ -286,19 +448,31 @@ export const SettingsView: React.FC<Props> = ({
               <Volume2 size={14} className="text-indigo-600" />
               <span>Sonnerie d'alarme par défaut</span>
             </label>
-            <button
-              type="button"
-              onClick={() => soundManager.testAlarmSound(currentSound)}
-              className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 bg-indigo-50 px-2 py-0.5 rounded-md cursor-pointer"
-            >
-              <Volume2 size={11} />
-              <span>Écouter</span>
-            </button>
+            {previewSound ? (
+              <button
+                type="button"
+                onClick={() => soundManager.stopPreview()}
+                className="text-[10px] font-black text-white bg-rose-600 hover:bg-rose-700 flex items-center gap-1 px-2.5 py-1 rounded-md cursor-pointer transition-all shadow-xs animate-pulse"
+              >
+                <VolumeX size={12} />
+                <span>Arrêter l'écoute</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => soundManager.testAlarmSound(currentSound)}
+                className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1 bg-indigo-50 px-2 py-0.5 rounded-md cursor-pointer"
+              >
+                <Volume2 size={11} />
+                <span>Écouter</span>
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-2 gap-2">
             {ALARM_SOUND_OPTIONS.map((snd) => {
               const isSelected = currentSound === snd.id;
+              const isCurrentlyPreviewing = previewSound === snd.id;
               return (
                 <button
                   key={snd.id}
@@ -307,19 +481,32 @@ export const SettingsView: React.FC<Props> = ({
                     onUpdateUserSettings({ defaultAlarmSound: snd.id });
                     soundManager.testAlarmSound(snd.id);
                   }}
-                  className={`p-3 rounded-2xl text-left border transition-all cursor-pointer ${
-                    isSelected
+                  className={`p-3 rounded-2xl text-left border transition-all cursor-pointer relative ${
+                    isCurrentlyPreviewing
+                      ? 'bg-rose-600 text-white border-rose-600 shadow-md ring-2 ring-rose-400'
+                      : isSelected
                       ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
                       : 'bg-neutral-50 text-neutral-800 border-neutral-200 hover:border-neutral-300'
                   }`}
                 >
-                  <div className="text-xs font-bold truncate">{snd.label}</div>
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs font-bold truncate">{snd.label}</div>
+                    {isCurrentlyPreviewing && (
+                      <span className="p-0.5 bg-white text-rose-700 rounded-full">
+                        <VolumeX size={10} />
+                      </span>
+                    )}
+                  </div>
                   <div
                     className={`text-[10px] truncate mt-0.5 ${
-                      isSelected ? 'text-indigo-100' : 'text-neutral-500'
+                      isCurrentlyPreviewing
+                        ? 'text-rose-100 font-bold'
+                        : isSelected
+                        ? 'text-indigo-100'
+                        : 'text-neutral-500'
                     }`}
                   >
-                    {snd.desc}
+                    {isCurrentlyPreviewing ? 'En lecture (cliquez pour arrêter)' : snd.desc}
                   </div>
                 </button>
               );
