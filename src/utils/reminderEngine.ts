@@ -1,6 +1,7 @@
 import { Task, User, AppNotification, ActiveAlarm, AlarmSoundType } from '../types';
 import { soundManager } from './audio';
 import { authStorage } from './authStorage';
+import { savePersistentAlarms, PersistentAlarm } from './alarmDb';
 
 let swRegistration: ServiceWorkerRegistration | null = null;
 
@@ -10,8 +11,12 @@ export async function initServiceWorker(): Promise<ServiceWorkerRegistration | n
     return null;
   }
   try {
-    const reg = await navigator.serviceWorker.register('/sw.js');
+    const reg = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
     swRegistration = reg;
+
+    // Check for service worker updates
+    reg.update().catch(() => {});
+
     return reg;
   } catch (e) {
     console.warn('Service Worker registration skipped or failed', e);
@@ -19,7 +24,7 @@ export async function initServiceWorker(): Promise<ServiceWorkerRegistration | n
   }
 }
 
-// Request browser notification permission
+// Request browser notification permission (like Facebook, Instagram, Snap)
 export async function requestNotificationPermission(): Promise<NotificationPermission> {
   if (typeof window === 'undefined' || !('Notification' in window)) {
     return 'denied';
@@ -49,10 +54,11 @@ export function sendBrowserNotification(
     const notifOptions: NotificationOptions & Record<string, unknown> = {
       icon: '/favicon.ico',
       badge: '/favicon.ico',
-      tag: options?.tag || 'task-alarm',
+      tag: options?.tag || `alarm-${options?.taskId || Date.now()}`,
       requireInteraction: true, // Stays on screen until user dismisses or acts
       renotify: true,
-      vibrate: [600, 200, 600, 200, 600],
+      silent: false,
+      vibrate: [1000, 300, 1000, 300, 1000, 300, 1500],
       data: {
         taskId: options?.taskId,
         sound: options?.sound || 'digital',
@@ -64,7 +70,7 @@ export function sendBrowserNotification(
       ...options,
     };
 
-    // Try service worker registration first for background persistence
+    // Try service worker registration first for background persistence on mobile
     if (swRegistration && 'showNotification' in swRegistration) {
       try {
         swRegistration.showNotification(title, notifOptions);
@@ -89,11 +95,43 @@ export function sendBrowserNotification(
   }
 }
 
-// Sync upcoming alarms with Service Worker for background triggering
-export function syncAlarmsToServiceWorker(tasks: Task[], user: User) {
-  if (!navigator.serviceWorker || !navigator.serviceWorker.controller) return;
+// Prevent immediate ring upon task creation if any reminder timestamp or due time was already in the past
+export function bypassPastRemindersOnTaskCreation(task: Task, userId: string) {
+  if (!task.dueDate || !task.dueTime) return;
+
+  const [hours, minutes] = task.dueTime.split(':').map(Number);
+  if (isNaN(hours) || isNaN(minutes)) return;
+
+  const [year, month, day] = task.dueDate.split('-').map(Number);
+  const dueTimeDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
+  const dueTimestamp = dueTimeDate.getTime();
+  const now = Date.now();
+
+  const reminderLead = task.reminderMinutesBefore ?? 0;
+
+  // If the reminder lead time is in the past, mark it so it NEVER rings immediately
+  if (reminderLead > 0) {
+    const reminderTimestamp = dueTimestamp - reminderLead * 60 * 1000;
+    if (reminderTimestamp <= now) {
+      const reminderKey = `alarm_reminder_fired_${userId}_${task.id}_${task.dueDate}_${task.dueTime}_${reminderLead}`;
+      localStorage.setItem(reminderKey, 'true');
+    }
+  }
+
+  // If the due time itself is in the past when creating the task, mark it as already handled
+  if (dueTimestamp <= now) {
+    const dueKey = `alarm_due_fired_${userId}_${task.id}_${task.dueDate}_${task.dueTime}`;
+    localStorage.setItem(dueKey, 'true');
+  }
+}
+
+// Sync upcoming alarms to IndexedDB and Service Worker for background triggering
+export async function syncAlarmsToServiceWorker(tasks: Task[], user: User) {
+  if (!tasks || tasks.length === 0 || !user) return;
 
   const now = Date.now();
+  const persistentAlarms: PersistentAlarm[] = [];
+
   tasks.forEach((task) => {
     if (task.completed || !task.dueDate || !task.dueTime) return;
 
@@ -104,44 +142,88 @@ export function syncAlarmsToServiceWorker(tasks: Task[], user: User) {
     const dueTimeDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
     const dueTimestamp = dueTimeDate.getTime();
 
-    const reminderLead =
-      task.reminderMinutesBefore ?? user.settings?.defaultReminderMinutes ?? 15;
+    // Default to 0 minutes (exact task hour and minute) as requested
+    const reminderLead = task.reminderMinutesBefore ?? user.settings?.defaultReminderMinutes ?? 0;
     const sound = task.alarmSound || user.settings?.defaultAlarmSound || 'digital';
+    const createdTimestamp = task.createdAt ? Date.parse(task.createdAt) : 0;
 
-    // 1. Approaching Reminder Alarm
+    // 1. Approaching Reminder Alarm (only if scheduled for a future moment AFTER creation)
     if (reminderLead > 0) {
       const reminderTimestamp = dueTimestamp - reminderLead * 60 * 1000;
-      if (reminderTimestamp > now) {
-        navigator.serviceWorker.controller.postMessage({
-          type: 'SCHEDULE_ALARM',
-          id: `alarm_${task.id}_reminder`,
+      if (reminderTimestamp > now && (createdTimestamp === 0 || reminderTimestamp > createdTimestamp)) {
+        persistentAlarms.push({
+          id: `alarm_${task.id}_reminder_${reminderLead}`,
           taskId: task.id,
-          title: `⏰ ALARME : Dans ${reminderLead} min`,
-          body: `« ${task.title} » est prévue pour ${task.dueTime} !`,
+          taskTitle: task.title,
+          title: `⏰ ALARME : Dans ${reminderLead} min !`,
+          body: `« ${task.title} » est prévue à ${task.dueTime}. Préparez-vous !`,
           triggerTimestamp: reminderTimestamp,
           alarmType: 'reminder',
           sound,
+          fired: false,
+          createdAt: now,
         });
       }
     }
 
-    // 2. Exact Due Time Alarm
-    if (dueTimestamp > now) {
-      navigator.serviceWorker.controller.postMessage({
-        type: 'SCHEDULE_ALARM',
+    // 2. Exact Due Time Alarm (at the exact hour and minute of the task)
+    if (dueTimestamp > now && (createdTimestamp === 0 || dueTimestamp > createdTimestamp)) {
+      persistentAlarms.push({
         id: `alarm_${task.id}_due`,
         taskId: task.id,
+        taskTitle: task.title,
         title: `🚨 ALARME : C'est l'heure !`,
         body: `« ${task.title} » commence maintenant (${task.dueTime}).`,
         triggerTimestamp: dueTimestamp,
         alarmType: 'due',
         sound,
+        fired: false,
+        createdAt: now,
+      });
+    }
+
+    // 3. Snooze Alarm if active
+    if (task.snoozedUntil && task.snoozedUntil > now) {
+      persistentAlarms.push({
+        id: `alarm_${task.id}_snooze_${task.snoozedUntil}`,
+        taskId: task.id,
+        taskTitle: task.title,
+        title: `⏰ RAPPEL RÉPÉTÉ (SNOOZE)`,
+        body: `C'est le moment d'effectuer : « ${task.title} » !`,
+        triggerTimestamp: task.snoozedUntil,
+        alarmType: 'snooze',
+        sound,
+        fired: false,
+        createdAt: now,
       });
     }
   });
+
+  // Save to persistent IndexedDB shared with Service Worker
+  await savePersistentAlarms(persistentAlarms);
+
+  // Notify Service Worker to schedule notifications
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    try {
+      const reg = swRegistration || (await navigator.serviceWorker.getRegistration());
+      if (reg && reg.active) {
+        reg.active.postMessage({
+          type: 'SYNC_ALARMS',
+          alarmsCount: persistentAlarms.length,
+        });
+      } else if (navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({
+          type: 'SYNC_ALARMS',
+          alarmsCount: persistentAlarms.length,
+        });
+      }
+    } catch (e) {
+      console.warn('Could not postMessage to Service Worker', e);
+    }
+  }
 }
 
-// High-precision Alarm Checker with Mobile Phone Wakeup & Catch-up Window
+// High-precision Alarm Checker for Active & Wake-up Sessions
 export function checkTaskReminders(
   tasks: Task[],
   user: User,
@@ -151,13 +233,13 @@ export function checkTaskReminders(
   if (!tasks || tasks.length === 0 || !user) return;
 
   const now = Date.now();
-  // 120 minutes (2 hours) catch-up window so phones waking from sleep never miss due alarms
-  const CATCH_UP_WINDOW_MS = 120 * 60 * 1000;
+  // 45 minutes catch-up window for phones waking from sleep/veille
+  const CATCH_UP_WINDOW_MS = 45 * 60 * 1000;
 
   tasks.forEach((task) => {
     if (task.completed) return;
 
-    // Check snoozed alarms
+    // 1. Check snoozed alarms
     if (task.snoozedUntil && task.snoozedUntil <= now && now < task.snoozedUntil + CATCH_UP_WINDOW_MS) {
       const snoozeKey = `alarm_snooze_fired_${task.id}_${task.snoozedUntil}`;
       if (!localStorage.getItem(snoozeKey)) {
@@ -212,15 +294,27 @@ export function checkTaskReminders(
     const dueTimeDate = new Date(year, month - 1, day, hours, minutes, 0, 0);
     const dueTimestamp = dueTimeDate.getTime();
 
-    const reminderLead =
-      task.reminderMinutesBefore ?? user.settings?.defaultReminderMinutes ?? 15;
+    // Default to 0 (ring at the exact hour and minute of the task)
+    const reminderLead = task.reminderMinutesBefore ?? user.settings?.defaultReminderMinutes ?? 0;
     const sound = task.alarmSound || user.settings?.defaultAlarmSound || 'digital';
+    const createdTimestamp = task.createdAt ? Date.parse(task.createdAt) : 0;
 
-    // 1. Approaching Reminder Alarm (e.g. 15 minutes before)
-    // Trigger if we are at or past the reminder time AND not yet past the due time
+    // RULE 1: If task was created for a time that was ALREADY past at the moment of creation,
+    // NEVER ring an alarm! (e.g. user logs a past task or yesterday's task)
+    if (createdTimestamp > 0 && dueTimestamp < createdTimestamp - 30000) {
+      return;
+    }
+
+    // RULE 2: Approaching Reminder Alarm (e.g. 5, 10, 15 min before)
+    // ONLY ring if:
+    // a) reminderLead > 0
+    // b) now >= reminderTimestamp && now < dueTimestamp
+    // c) The reminder timestamp was NOT already in the past when the task was created!
     if (reminderLead > 0) {
       const reminderTimestamp = dueTimestamp - reminderLead * 60 * 1000;
-      if (now >= reminderTimestamp && now < dueTimestamp) {
+      const isReminderAfterCreation = createdTimestamp === 0 || reminderTimestamp >= createdTimestamp - 15000;
+
+      if (isReminderAfterCreation && now >= reminderTimestamp && now < dueTimestamp) {
         const reminderKey = `alarm_reminder_fired_${user.id}_${task.id}_${task.dueDate}_${task.dueTime}_${reminderLead}`;
         if (!localStorage.getItem(reminderKey)) {
           localStorage.setItem(reminderKey, 'true');
@@ -265,10 +359,11 @@ export function checkTaskReminders(
       }
     }
 
-    // 2. Exact Due Time Alarm
-    // Generous catch-up window of up to 2 hours so that if the phone was locked/sleeping,
-    // the user is immediately alerted the moment they unlock or open the screen!
-    if (now >= dueTimestamp && now < dueTimestamp + CATCH_UP_WINDOW_MS) {
+    // RULE 3: Exact Due Time Alarm (at the exact hour and minute of the task)
+    // Ring when now >= dueTimestamp
+    // Only applies if the task was created before or at its due time!
+    const isDueAfterCreation = createdTimestamp === 0 || dueTimestamp >= createdTimestamp - 30000;
+    if (isDueAfterCreation && now >= dueTimestamp && now < dueTimestamp + CATCH_UP_WINDOW_MS) {
       const dueKey = `alarm_due_fired_${user.id}_${task.id}_${task.dueDate}_${task.dueTime}`;
       if (!localStorage.getItem(dueKey)) {
         localStorage.setItem(dueKey, 'true');
@@ -408,4 +503,3 @@ export function startAlarmHeartbeat(onTick: () => void): () => void {
     }
   };
 }
-

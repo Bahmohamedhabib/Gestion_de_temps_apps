@@ -101,7 +101,7 @@ export const authStorage = {
         enableAudioAlerts: true,
         enableBrowserNotifications: true,
         enableVibration: true,
-        defaultReminderMinutes: 15,
+        defaultReminderMinutes: 0,
         defaultAlarmSound: 'digital',
         soundTheme: 'chime',
       },
@@ -125,7 +125,7 @@ export const authStorage = {
         priority: 'high',
         category: 'work',
         reminder: true,
-        reminderMinutesBefore: 15,
+        reminderMinutesBefore: 0,
         subtasks: [
           { id: 'sub-w1', title: 'Découvrir la vue calendrier semaine et mois', completed: true },
           { id: 'sub-w2', title: 'Créer ma première tâche personnelle avec rappel', completed: false },

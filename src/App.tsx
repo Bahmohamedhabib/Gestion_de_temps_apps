@@ -18,6 +18,7 @@ import {
   syncAlarmsToServiceWorker,
   triggerTestAlarm,
   startAlarmHeartbeat,
+  bypassPastRemindersOnTaskCreation,
 } from './utils/reminderEngine';
 
 // Components
@@ -161,6 +162,37 @@ export default function App() {
     return () => {
       navigator.serviceWorker.removeEventListener('message', handleServiceWorkerMessage);
     };
+  }, [tasks, currentUser]);
+
+  // Handle opening app from phone lockscreen notification click (?ringTaskId=... or ?snoozeTaskId=...)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const urlParams = new URLSearchParams(window.location.search);
+    const ringTaskId = urlParams.get('ringTaskId');
+    const snoozeTaskId = urlParams.get('snoozeTaskId');
+    const soundParam = (urlParams.get('sound') as AlarmSoundType) || 'digital';
+
+    if (ringTaskId) {
+      window.history.replaceState({}, '', window.location.pathname);
+      const foundTask =
+        tasks.find((t) => t.id === ringTaskId) ||
+        (currentUser ? authStorage.getUserTasks(currentUser.id).find((t) => t.id === ringTaskId) : undefined);
+      if (foundTask) {
+        soundManager.unlockAudioNow();
+        setActiveAlarm({
+          task: foundTask,
+          type: 'due',
+          title: `⏰ C'EST L'HEURE : ${foundTask.title}`,
+          message: `Votre tâche programmée pour ${foundTask.dueTime || 'maintenant'} sonne !`,
+          sound: soundParam,
+          startedAt: Date.now(),
+        });
+        soundManager.startAlarm(soundParam, currentUser?.settings?.enableVibration ?? true);
+      }
+    } else if (snoozeTaskId) {
+      window.history.replaceState({}, '', window.location.pathname);
+      handleSnoozeAlarm(5);
+    }
   }, [tasks, currentUser]);
 
   // Sync scheduled alarms to Service Worker for background wakeups whenever tasks change
@@ -436,6 +468,8 @@ export default function App() {
         message: `Les modifications de « ${taskData.title} » ont été enregistrées.`,
         type: 'info',
       });
+      // Bypass past alarms for updated task
+      bypassPastRemindersOnTaskCreation(updated, currentUser.id);
       setNotifications((prevN) => [notif, ...prevN]);
       cloudDb.addNotification(notif).catch(() => {});
     } else {
@@ -461,6 +495,9 @@ export default function App() {
         createdAt: new Date().toISOString(),
       };
 
+      // Crucial: Bypass past alarms so the task NEVER rings immediately upon creation
+      bypassPastRemindersOnTaskCreation(newTask, currentUser.id);
+
       setTasks((prev) => [newTask, ...prev]);
       try {
         await cloudDb.saveTask(newTask);
@@ -468,15 +505,17 @@ export default function App() {
         console.warn('Failed to save task in cloud:', err);
       }
 
-      // Audio feedback
+      // Audio feedback: subtle gentle chime confirming task is created
       if (currentUser.settings?.enableAudioAlerts) {
         soundManager.playCreationChime();
       }
 
       const reminderInfo = newTask.reminder
-        ? ` Sonnera ${newTask.reminderMinutesBefore || 15} min avant.`
+        ? (newTask.reminderMinutesBefore === 0
+            ? " Alarme programmée à l'heure et minute exacte de la tâche."
+            : ` Alarme programmée ${newTask.reminderMinutesBefore} min avant.`)
         : '';
-      const dueDetails = newTask.dueTime ? ` prévue à ${newTask.dueTime}` : ` pour le ${newTask.dueDate}`;
+      const dueDetails = newTask.dueTime ? ` à ${newTask.dueTime}` : ` pour le ${newTask.dueDate}`;
       const notif = authStorage.addNotification(currentUser.id, {
         taskId: newTask.id,
         taskTitle: newTask.title,
@@ -485,13 +524,7 @@ export default function App() {
         type: 'created',
       });
 
-      if (currentUser.settings?.enableBrowserNotifications) {
-        sendBrowserNotification('Nouvelle tâche créée 🚀', {
-          body: `« ${newTask.title} » ajoutée avec succès.${reminderInfo}`,
-          taskId: newTask.id,
-        });
-      }
-
+      // Show in-app notification banner (without triggering phone vibration or alarm sounds)
       setNotifications((prevN) => [notif, ...prevN]);
       setActiveAlert(notif);
       cloudDb.addNotification(notif).catch(() => {});

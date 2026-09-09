@@ -38,10 +38,10 @@ const QUICK_TIMES = [
 ];
 
 const REMINDER_OPTIONS = [
-  { label: 'À l\'heure exacte (0 min)', value: 0 },
+  { label: 'À l\'heure et minute exacte de la tâche (0 min - Recommandé)', value: 0 },
   { label: '5 minutes avant', value: 5 },
   { label: '10 minutes avant', value: 10 },
-  { label: '15 minutes avant (Recommandé)', value: 15 },
+  { label: '15 minutes avant', value: 15 },
   { label: '30 minutes avant', value: 30 },
   { label: '1 heure avant', value: 60 },
 ];
@@ -83,7 +83,7 @@ export const TaskModal: React.FC<Props> = ({
       setDueDate(initialTask.dueDate || getTodayDateString());
       setDueTime(initialTask.dueTime || '');
       setReminder(initialTask.reminder ?? true);
-      setReminderMinutesBefore(initialTask.reminderMinutesBefore ?? defaultReminderMinutes);
+      setReminderMinutesBefore(initialTask.reminderMinutesBefore ?? (defaultReminderMinutes ?? 0));
       setAlarmSound(initialTask.alarmSound || defaultAlarmSound);
       setSubtasks(initialTask.subtasks || []);
     } else {
@@ -94,7 +94,7 @@ export const TaskModal: React.FC<Props> = ({
       setDueDate(getTodayDateString());
       setDueTime('');
       setReminder(true);
-      setReminderMinutesBefore(defaultReminderMinutes);
+      setReminderMinutesBefore(defaultReminderMinutes ?? 0);
       setAlarmSound(defaultAlarmSound);
       setSubtasks([]);
     }
@@ -130,6 +130,19 @@ export const TaskModal: React.FC<Props> = ({
   };
 
   const calculatedAlarmTime = calculateAlarmTime();
+
+  // Check if chosen time is already past today
+  const isPastTimeToday = (() => {
+    if (!dueDate || !dueTime) return false;
+    const today = getTodayDateString();
+    if (dueDate !== today) return false;
+    const [h, m] = dueTime.split(':').map(Number);
+    if (isNaN(h) || isNaN(m)) return false;
+    const now = new Date();
+    const currentMin = now.getHours() * 60 + now.getMinutes();
+    const taskMin = h * 60 + m;
+    return taskMin < currentMin;
+  })();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -408,12 +421,22 @@ export const TaskModal: React.FC<Props> = ({
                       <div className="p-2.5 bg-indigo-600/10 border border-indigo-200 rounded-xl text-xs text-indigo-950 flex items-center justify-between">
                         <span className="text-[11px] font-medium text-indigo-800">
                           {reminderMinutesBefore === 0
-                            ? `⚡ L'alarme sonnera exactement à ${dueTime}`
+                            ? `⚡ L'alarme sonnera exactement à l'heure et minute de la tâche (${dueTime})`
                             : `⚡ L'alarme sonnera à ${calculatedAlarmTime} (${reminderMinutesBefore} min avant ${dueTime})`}
                         </span>
                         <span className="text-[11px] font-black text-indigo-700 bg-white px-2 py-0.5 rounded-lg border border-indigo-200">
-                          {calculatedAlarmTime}
+                          {reminderMinutesBefore === 0 ? dueTime : calculatedAlarmTime}
                         </span>
+                      </div>
+                    )}
+
+                    {/* Past Time Warning */}
+                    {isPastTimeToday && (
+                      <div className="p-2.5 bg-amber-50 border border-amber-200/90 rounded-xl text-xs text-amber-900 flex items-start gap-2">
+                        <span className="text-sm">⚠️</span>
+                        <div className="text-[11px] leading-relaxed">
+                          <strong className="font-bold">Heure passée aujourd'hui :</strong> L'heure indiquée ({dueTime}) est déjà passée. L'alarme ne sonnera pas immédiatement pour éviter toute sonnerie intempestive.
+                        </div>
                       </div>
                     )}
 

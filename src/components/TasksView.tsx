@@ -16,6 +16,7 @@ import { Task, CategoryId, FilterStatus, SortOption, User } from '../types';
 import { CATEGORIES, getTodayDateString } from '../data/defaultTasks';
 import { TaskCard } from './TaskCard';
 import { CategoryIcon } from './CategoryIcon';
+import { PhoneNotificationBanner } from './PhoneNotificationBanner';
 
 interface Props {
   tasks: Task[];
@@ -105,6 +106,9 @@ export const TasksView: React.FC<Props> = ({
 
   return (
     <div className="space-y-4 pb-20">
+      {/* Mobile Phone Notification Permission Prompt */}
+      <PhoneNotificationBanner />
+
       {/* Top Banner / Progress card */}
       <div className="bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-800 rounded-3xl p-5 text-white shadow-lg shadow-indigo-600/20">
         <div className="flex items-start justify-between">
