@@ -1,5 +1,5 @@
-// Service Worker for Mobile Tasks App - Background Alarms, Lockscreen Notifications & Offline Support
-const CACHE_NAME = 'tasks-app-v5';
+// Service Worker for Mobile Tasks App - Real Web Push, Background Alarms, Lockscreen Notifications
+const CACHE_NAME = 'tasks-app-v6';
 const DB_NAME = 'task_mobile_alarms_db';
 const DB_VERSION = 1;
 const STORE_NAME = 'scheduled_alarms';
@@ -58,7 +58,7 @@ async function markAlarmAsFiredInDB(id) {
   }
 }
 
-// Check and fire due alarms from IndexedDB
+// Check and fire due alarms from IndexedDB as local fallback
 async function checkAndTriggerDueAlarms() {
   const now = Date.now();
   const alarms = await getPendingAlarmsFromDB();
@@ -68,13 +68,12 @@ async function checkAndTriggerDueAlarms() {
   for (const alarm of alarms) {
     // If due or overdue within 60 minutes
     if (alarm.triggerTimestamp <= now && now < alarm.triggerTimestamp + 60 * 60 * 1000) {
-      // Fire alarm notification with phone vibration and high priority
       try {
         await self.registration.showNotification(alarm.title, {
           body: alarm.body,
-          icon: '/favicon.ico',
-          badge: '/favicon.ico',
-          tag: alarm.id,
+          icon: '/icon.svg',
+          badge: '/icon.svg',
+          tag: `task-alarm-${alarm.taskId}`,
           renotify: true,
           requireInteraction: true,
           silent: false,
@@ -122,6 +121,64 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// =========================================================================
+// REAL WEB PUSH (Standard for background wakeups when app is closed / phone locked)
+// Like Facebook, Instagram, Snapchat, WhatsApp
+// =========================================================================
+self.addEventListener('push', (event) => {
+  console.log('[SW] Push notification received from server!');
+  let payload = {};
+
+  if (event.data) {
+    try {
+      payload = event.data.json();
+    } catch (e) {
+      payload = { title: '⏰ Alarme de Tâche', body: event.data.text() };
+    }
+  }
+
+  const title = payload.title || "⏰ C'EST L'HEURE DE VOTRE TÂCHE !";
+  const body = payload.body || 'Une alarme de tâche programmée sonne maintenant.';
+  const taskId = payload.taskId || 'task';
+  const sound = payload.sound || 'digital';
+
+  const notificationOptions = {
+    body: body,
+    icon: '/icon.svg',
+    badge: '/icon.svg',
+    tag: `task-push-${taskId}`,
+    renotify: true,
+    requireInteraction: true, // Remains on lockscreen until user interacts
+    silent: false,
+    vibrate: [1000, 300, 1000, 300, 1000, 300, 1500],
+    data: {
+      taskId: taskId,
+      taskTitle: payload.taskTitle,
+      sound: sound,
+      url: `/?ringTaskId=${taskId}&sound=${sound}`,
+    },
+    actions: [
+      { action: 'open_alarm', title: '⏰ Arrêter / Ouvrir' },
+      { action: 'snooze_5', title: '💤 Répéter 5 min' },
+    ],
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(title, notificationOptions).then(() => {
+      // Broadcast to any open windows if any
+      return self.clients.matchAll({ type: 'window' }).then((clients) => {
+        clients.forEach((client) => {
+          client.postMessage({
+            type: 'TRIGGER_ALARM_SCREEN',
+            taskId: taskId,
+            sound: sound,
+          });
+        });
+      });
+    })
+  );
+});
+
 // Periodic background sync if supported by browser
 self.addEventListener('periodicsync', (event) => {
   if (event.tag === 'check-task-alarms') {
@@ -135,12 +192,12 @@ self.addEventListener('sync', (event) => {
   }
 });
 
-// Periodic watchdog ticker (active while SW process lives)
+// Watchdog interval while worker is alive
 setInterval(() => {
   checkAndTriggerDueAlarms();
 }, 10000);
 
-// Listen for messages from client
+// Listen for messages from client application
 self.addEventListener('message', (event) => {
   if (!event.data) return;
 
@@ -148,8 +205,8 @@ self.addEventListener('message', (event) => {
     const { title, options } = event.data;
     self.registration.showNotification(title, {
       body: options?.body || 'Rappel de tâche',
-      icon: options?.icon || '/favicon.ico',
-      badge: options?.badge || '/favicon.ico',
+      icon: options?.icon || '/icon.svg',
+      badge: options?.badge || '/icon.svg',
       tag: options?.tag || 'task-reminder',
       renotify: true,
       requireInteraction: true,
@@ -157,7 +214,7 @@ self.addEventListener('message', (event) => {
       vibrate: [800, 200, 800, 200, 800],
       data: options?.data || {},
       actions: [
-        { action: 'open_alarm', title: '⏰ Ouvrir / Arrêter' },
+        { action: 'open_alarm', title: '⏰ Arrêter / Ouvrir' },
         { action: 'snooze_5', title: '💤 Répéter 5 min' },
       ],
       ...options,
@@ -165,63 +222,37 @@ self.addEventListener('message', (event) => {
   }
 
   if (event.data.type === 'SYNC_ALARMS' || event.data.type === 'SCHEDULE_ALARM') {
-    // If browser supports Notification Triggers (Chrome Android native AlarmManager triggers)
-    if (event.data.alarm && 'showTrigger' in Notification.prototype && typeof TimestampTrigger !== 'undefined') {
-      try {
-        const a = event.data.alarm;
-        if (a.triggerTimestamp > Date.now()) {
-          self.registration.showNotification(a.title, {
-            body: a.body,
-            icon: '/favicon.ico',
-            badge: '/favicon.ico',
-            tag: a.id,
-            showTrigger: new TimestampTrigger(a.triggerTimestamp),
-            requireInteraction: true,
-            renotify: true,
-            vibrate: [1000, 300, 1000, 300, 1000, 300, 1500],
-            data: {
-              taskId: a.taskId,
-              alarmType: a.alarmType,
-              sound: a.sound || 'digital',
-            },
-            actions: [
-              { action: 'open_alarm', title: '⏰ Arrêter / Ouvrir' },
-              { action: 'snooze_5', title: '💤 Répéter 5 min' },
-            ],
-          });
-        }
-      } catch (err) {
-        console.warn('Notification Trigger scheduling error:', err);
-      }
-    }
     checkAndTriggerDueAlarms();
   }
 });
 
-// Handle notification click on phone lockscreen or notification center
+// Handle notification click on phone lockscreen or notification tray
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
   const notifData = event.notification.data || {};
   const isSnooze = event.action === 'snooze_5';
+  const taskId = notifData.taskId || 'task';
+  const sound = notifData.sound || 'digital';
 
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
-      // 1. If an existing window is open, focus it and trigger alarm
+      // 1. If an existing window is open, focus it and trigger alarm screen
       for (const client of clientList) {
         if ('focus' in client) {
           client.postMessage({
             type: isSnooze ? 'SNOOZE_TASK' : 'TRIGGER_ALARM_SCREEN',
-            taskId: notifData.taskId,
-            alarmType: notifData.alarmType,
-            sound: notifData.sound,
+            taskId: taskId,
+            sound: sound,
           });
           return client.focus();
         }
       }
 
-      // 2. If app is closed, launch window with query param to immediately sound the alarm
+      // 2. If app was closed, launch window with query params to immediately pop alarm and ring
       if (self.clients.openWindow) {
-        const ringParam = isSnooze ? `snoozeTaskId=${notifData.taskId}` : `ringTaskId=${notifData.taskId}&sound=${notifData.sound || 'digital'}`;
+        const ringParam = isSnooze
+          ? `snoozeTaskId=${taskId}`
+          : `ringTaskId=${taskId}&sound=${sound}`;
         return self.clients.openWindow(`/?${ringParam}`);
       }
     })

@@ -52,8 +52,8 @@ export function sendBrowserNotification(
 
   if (Notification.permission === 'granted') {
     const notifOptions: NotificationOptions & Record<string, unknown> = {
-      icon: '/favicon.ico',
-      badge: '/favicon.ico',
+      icon: '/icon.svg',
+      badge: '/icon.svg',
       tag: options?.tag || `alarm-${options?.taskId || Date.now()}`,
       requireInteraction: true, // Stays on screen until user dismisses or acts
       renotify: true,
@@ -503,3 +503,122 @@ export function startAlarmHeartbeat(onTick: () => void): () => void {
     }
   };
 }
+
+/**
+ * Converts a base64 string to Uint8Array for PushManager subscription key
+ */
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+/**
+ * Subscribes the current mobile device / browser to Web Push Notifications
+ * (Enables lockscreen wakeups and alarms when the app is completely closed)
+ */
+export async function subscribeToWebPush(userId?: string): Promise<boolean> {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    console.warn('Web Push not supported on this browser/platform');
+    return false;
+  }
+
+  try {
+    const reg = swRegistration || (await navigator.serviceWorker.ready);
+    if (!reg || !reg.pushManager) {
+      console.warn('ServiceWorker pushManager not available');
+      return false;
+    }
+
+    // 1. Fetch public VAPID key from server
+    let vapidPublicKey = '';
+    try {
+      const keyRes = await fetch('/api/push/public-key');
+      if (keyRes.ok) {
+        const keyData = await keyRes.json();
+        vapidPublicKey = keyData.publicKey;
+      }
+    } catch (e) {
+      console.warn('Failed to fetch VAPID key from server, using fallback', e);
+    }
+
+    if (!vapidPublicKey) {
+      vapidPublicKey =
+        'BP5uSV6Fq2hucys8KvfcUVh9UwunqNvW4ZEBcNK2-e0S7_gCtRTVB_xFGES7WcNeWJg2BbVtYAGywPPxfIt2QTg';
+    }
+
+    // 2. Check existing subscription or create new
+    let subscription = await reg.pushManager.getSubscription();
+    if (!subscription) {
+      const applicationServerKey = urlBase64ToUint8Array(vapidPublicKey);
+      subscription = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: applicationServerKey as any,
+      });
+    }
+
+    // 3. Send subscription to server
+    await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subscription: subscription.toJSON(),
+        userId: userId || 'current-user',
+      }),
+    });
+
+    console.log('✅ Web Push registered successfully with server!');
+    return true;
+  } catch (err) {
+    console.warn('Could not register Web Push subscription:', err);
+    return false;
+  }
+}
+
+/**
+ * Synchronizes scheduled tasks with the fullstack backend server
+ * so the server can push notifications when the app is closed.
+ */
+export async function syncTasksToPushServer(userId: string, tasks: Task[]): Promise<void> {
+  if (typeof window === 'undefined' || !userId) return;
+
+  try {
+    await fetch('/api/push/sync-tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, tasks }),
+    });
+  } catch (err) {
+    // Silently handle if offline or server temporarily unavailable
+    console.warn('Could not sync tasks to push server:', err);
+  }
+}
+
+/**
+ * Triggers a real test Push notification from the server to test mobile lockscreen wake-up
+ */
+export async function triggerServerTestPush(userId?: string, sound?: AlarmSoundType): Promise<{ success: boolean; message: string }> {
+  try {
+    const res = await fetch('/api/push/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: userId || 'current-user',
+        sound: sound || 'digital',
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      return { success: true, message: data.message || 'Notification de test envoyée au téléphone !' };
+    }
+    return { success: false, message: 'Échec de l\'envoi du test.' };
+  } catch (err: any) {
+    return { success: false, message: err.message || 'Erreur réseau.' };
+  }
+}
+

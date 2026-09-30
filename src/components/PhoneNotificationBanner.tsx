@@ -1,17 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { BellRing, CheckCircle2, AlertTriangle, ShieldCheck, Sparkles, Volume2 } from 'lucide-react';
-import { requestNotificationPermission, sendBrowserNotification } from '../utils/reminderEngine';
+import { BellRing, CheckCircle2, AlertTriangle, Send, Sparkles } from 'lucide-react';
+import { requestNotificationPermission, sendBrowserNotification, subscribeToWebPush, triggerServerTestPush } from '../utils/reminderEngine';
 
 interface Props {
   onPermissionChanged?: (permission: NotificationPermission) => void;
+  userId?: string;
 }
 
-export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged }) => {
+export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged, userId }) => {
   const [permission, setPermission] = useState<NotificationPermission>(() => {
     return typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default';
   });
   const [showSuccess, setShowSuccess] = useState(false);
   const [isActivating, setIsActivating] = useState(false);
+  const [isTestingPush, setIsTestingPush] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window !== 'undefined' && 'Notification' in window) {
@@ -21,19 +24,21 @@ export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged }
 
   const handleEnableNotifications = async () => {
     setIsActivating(true);
+    setTestResult(null);
     try {
       const result = await requestNotificationPermission();
       setPermission(result);
       if (onPermissionChanged) onPermissionChanged(result);
 
       if (result === 'granted') {
+        // Register Web Push subscription with server
+        await subscribeToWebPush(userId);
+
         setShowSuccess(true);
-        // Dispatch test confirmation notification to show up in phone notification drawer
-        sendBrowserNotification('✅ Notifications du téléphone activées !', {
-          body: 'Vos rappels de tâches sonneront et vibreront à l\'heure exacte, même en veille !',
-          tag: 'welcome-notification',
-        });
-        setTimeout(() => setShowSuccess(false), 6000);
+        // Dispatch test confirmation notification from server
+        await triggerServerTestPush(userId);
+
+        setTimeout(() => setShowSuccess(false), 8000);
       }
     } catch (e) {
       console.warn('Error activating notifications', e);
@@ -42,9 +47,45 @@ export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged }
     }
   };
 
-  // If already granted and not showing temporary success message, we can hide or show a mini confirmation
+  const handleTestLockscreenPush = async () => {
+    setIsTestingPush(true);
+    setTestResult(null);
+    try {
+      // Ensure subscribed
+      await subscribeToWebPush(userId);
+      const res = await triggerServerTestPush(userId);
+      setTestResult(res.message);
+      setTimeout(() => setTestResult(null), 6000);
+    } catch (err: any) {
+      setTestResult('Erreur de test');
+    } finally {
+      setIsTestingPush(false);
+    }
+  };
+
+  // If already granted and not testing, show a compact reassurance badge with test button
   if (permission === 'granted' && !showSuccess) {
-    return null;
+    return (
+      <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 flex items-center justify-between text-xs text-emerald-950 mb-3">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-lg bg-emerald-500 text-white flex items-center justify-center shrink-0">
+            <CheckCircle2 size={14} />
+          </div>
+          <span className="font-semibold text-[11px] text-emerald-900">
+            Notifications en veille actives (Web Push)
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={handleTestLockscreenPush}
+          disabled={isTestingPush}
+          className="px-2.5 py-1 bg-white hover:bg-emerald-50 active:scale-95 text-emerald-700 font-bold text-[10px] rounded-lg border border-emerald-200 shadow-2xs transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+        >
+          <Send size={10} />
+          <span>{isTestingPush ? 'Envoi...' : testResult || 'Tester sur mon tél'}</span>
+        </button>
+      </div>
+    );
   }
 
   return (
@@ -56,13 +97,13 @@ export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged }
           </div>
           <div className="flex-1 min-w-0">
             <h4 className="text-xs font-black text-emerald-900 flex items-center gap-1.5">
-              <span>Notifications activées avec succès !</span>
+              <span>Notifications du téléphone activées !</span>
               <span className="px-1.5 py-0.2 bg-emerald-200 text-emerald-900 rounded text-[9px] font-extrabold uppercase">
                 Actif
               </span>
             </h4>
             <p className="text-[11px] text-emerald-800 mt-0.5 leading-snug">
-              Une notification test a été envoyée dans la barre de votre téléphone. Vos alarmes sonneront à l'heure et minute exacte de vos tâches !
+              Une notification test a été envoyée par le serveur. Vos alarmes sonneront et vibreront à l'heure exacte de vos tâches, même application fermée !
             </p>
           </div>
         </div>
@@ -89,17 +130,17 @@ export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged }
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[9px] font-black uppercase tracking-wider">
-                  Important
+                  Essentiel
                 </span>
                 <span className="text-[10px] font-semibold text-indigo-700">
                   Comme Facebook, Instagram ou Snap
                 </span>
               </div>
               <h4 className="text-xs font-extrabold text-neutral-900 mt-1">
-                Accéder aux notifications du téléphone
+                Activer les notifications et alarmes en veille
               </h4>
               <p className="text-[11px] text-neutral-600 mt-0.5 leading-relaxed">
-                Activez les notifications pour que vos tâches sonnent et vibrent à l'heure et minute exacte, même si l'application est fermée ou votre téléphone en veille.
+                Autorisez les notifications pour recevoir les alertes sur l'écran verrouillé et faire sonner votre téléphone à l'heure exacte de chaque tâche, même application fermée.
               </p>
               <div className="mt-3 flex items-center gap-2">
                 <button
@@ -109,7 +150,7 @@ export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged }
                   className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
                   <BellRing size={13} />
-                  <span>{isActivating ? 'Activation...' : 'Activer les notifications'}</span>
+                  <span>{isActivating ? 'Activation...' : 'Activer les notifications du téléphone'}</span>
                 </button>
               </div>
             </div>

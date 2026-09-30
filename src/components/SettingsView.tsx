@@ -28,7 +28,13 @@ import {
 } from 'lucide-react';
 import { Task, User, UserSettings, AlarmSoundType, ActiveAlarm } from '../types';
 import { soundManager } from '../utils/audio';
-import { requestNotificationPermission, sendBrowserNotification, triggerTestAlarm } from '../utils/reminderEngine';
+import {
+  requestNotificationPermission,
+  sendBrowserNotification,
+  triggerTestAlarm,
+  subscribeToWebPush,
+  triggerServerTestPush,
+} from '../utils/reminderEngine';
 
 interface Props {
   tasks: Task[];
@@ -143,12 +149,10 @@ export const SettingsView: React.FC<Props> = ({
     setPermissionStatus(res);
     if (res === 'granted') {
       onUpdateUserSettings({ enableBrowserNotifications: true });
-      sendBrowserNotification('Notifications & Alarmes activées ! 🔔', {
-        body: 'Le système d\'alarme sonnera à l\'approche de vos échéances avec vibrations.',
-        sound: currentUser.settings?.defaultAlarmSound || 'digital',
-      });
+      await subscribeToWebPush(currentUser.id);
+      await triggerServerTestPush(currentUser.id, currentUser.settings?.defaultAlarmSound || 'digital');
       soundManager.playReminderChime();
-      showFeedback('Notifications et alertes d\'alarme autorisées !');
+      showFeedback('Notifications Web Push activées ! Test envoyé sur votre téléphone.');
     } else {
       showFeedback('Autorisation de notification refusée dans le navigateur.');
     }

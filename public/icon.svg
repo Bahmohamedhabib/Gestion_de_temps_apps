@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="50%" stop-color="#6366f1" />
+      <stop offset="100%" stop-color="#7c3aed" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#312e81" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)" />
+  <g filter="url(#shadow)" transform="translate(106, 106)">
+    <!-- Bell Icon Body -->
+    <path d="M150 20 C105 20 70 55 70 100 L70 180 L40 220 C32 230 40 245 52 245 L248 245 C260 245 268 230 260 220 L230 180 L230 100 C230 55 195 20 150 20 Z" fill="#ffffff" />
+    <!-- Clapper -->
+    <path d="M125 255 C125 268 136 280 150 280 C164 280 175 268 175 255 Z" fill="#e0e7ff" />
+    <!-- Checkmark Badge on Bell -->
+    <circle cx="215" cy="85" r="45" fill="#10b981" stroke="#ffffff" stroke-width="8" />
+    <path d="M198 85 L210 97 L232 75" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round" />
+  </g>
+</svg>

@@ -19,6 +19,8 @@ import {
   triggerTestAlarm,
   startAlarmHeartbeat,
   bypassPastRemindersOnTaskCreation,
+  subscribeToWebPush,
+  syncTasksToPushServer,
 } from './utils/reminderEngine';
 
 // Components
@@ -195,10 +197,20 @@ export default function App() {
     }
   }, [tasks, currentUser]);
 
-  // Sync scheduled alarms to Service Worker for background wakeups whenever tasks change
+  // Initialize ServiceWorker and register Web Push for background lockscreen alarms
+  useEffect(() => {
+    initServiceWorker().then(() => {
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        subscribeToWebPush(currentUser?.id);
+      }
+    });
+  }, [currentUser?.id]);
+
+  // Sync scheduled alarms to Service Worker and Server Push Scheduler for background wakeups
   useEffect(() => {
     if (currentUser) {
       syncAlarmsToServiceWorker(tasks, currentUser);
+      syncTasksToPushServer(currentUser.id, tasks);
     }
   }, [tasks, currentUser]);
 
