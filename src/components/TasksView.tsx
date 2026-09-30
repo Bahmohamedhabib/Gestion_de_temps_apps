@@ -26,6 +26,7 @@ interface Props {
   onEditTask: (task: Task) => void;
   onDeleteTask: (id: string) => void;
   onOpenCreateModal: () => void;
+  onOpenInstallModal?: () => void;
 }
 
 export const TasksView: React.FC<Props> = ({
@@ -36,6 +37,7 @@ export const TasksView: React.FC<Props> = ({
   onEditTask,
   onDeleteTask,
   onOpenCreateModal,
+  onOpenInstallModal,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('today');
@@ -107,7 +109,7 @@ export const TasksView: React.FC<Props> = ({
   return (
     <div className="space-y-4 pb-20">
       {/* Mobile Phone Notification Permission Prompt */}
-      <PhoneNotificationBanner userId={currentUser?.id} />
+      <PhoneNotificationBanner userId={currentUser?.id} onOpenInstallModal={onOpenInstallModal} />
 
       {/* Top Banner / Progress card */}
       <div className="bg-gradient-to-br from-indigo-600 via-indigo-700 to-violet-800 rounded-3xl p-5 text-white shadow-lg shadow-indigo-600/20">

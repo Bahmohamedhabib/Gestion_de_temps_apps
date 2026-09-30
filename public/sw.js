@@ -71,8 +71,8 @@ async function checkAndTriggerDueAlarms() {
       try {
         await self.registration.showNotification(alarm.title, {
           body: alarm.body,
-          icon: '/icon.svg',
-          badge: '/icon.svg',
+          icon: '/pwa-192x192.png',
+          badge: '/pwa-192x192.png',
           tag: `task-alarm-${alarm.taskId}`,
           renotify: true,
           requireInteraction: true,
@@ -144,8 +144,8 @@ self.addEventListener('push', (event) => {
 
   const notificationOptions = {
     body: body,
-    icon: '/icon.svg',
-    badge: '/icon.svg',
+    icon: '/pwa-192x192.png',
+    badge: '/pwa-192x192.png',
     tag: `task-push-${taskId}`,
     renotify: true,
     requireInteraction: true, // Remains on lockscreen until user interacts
@@ -205,8 +205,8 @@ self.addEventListener('message', (event) => {
     const { title, options } = event.data;
     self.registration.showNotification(title, {
       body: options?.body || 'Rappel de tâche',
-      icon: options?.icon || '/icon.svg',
-      badge: options?.badge || '/icon.svg',
+      icon: options?.icon || '/pwa-192x192.png',
+      badge: options?.badge || '/pwa-192x192.png',
       tag: options?.tag || 'task-reminder',
       renotify: true,
       requireInteraction: true,

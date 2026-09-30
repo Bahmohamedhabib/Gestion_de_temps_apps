@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bell, ShieldCheck } from 'lucide-react';
+import { Bell, Smartphone } from 'lucide-react';
 import { User } from '../types';
 
 interface Props {
@@ -7,6 +7,7 @@ interface Props {
   unreadNotifsCount: number;
   onOpenNotifications: () => void;
   onOpenUserMenu: () => void;
+  onOpenInstallModal: () => void;
 }
 
 export const AppHeader: React.FC<Props> = ({
@@ -14,6 +15,7 @@ export const AppHeader: React.FC<Props> = ({
   unreadNotifsCount,
   onOpenNotifications,
   onOpenUserMenu,
+  onOpenInstallModal,
 }) => {
   const initials = currentUser.name
     .split(' ')
@@ -42,8 +44,17 @@ export const AppHeader: React.FC<Props> = ({
         </div>
       </button>
 
-      {/* Right actions: Notification Bell */}
+      {/* Right actions: Mobile App button + Notification Bell */}
       <div className="flex items-center gap-2">
+        <button
+          onClick={onOpenInstallModal}
+          className="flex items-center gap-1.5 py-1.5 px-3 rounded-full bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white shadow-2xs text-[11px] font-bold transition-all cursor-pointer"
+          title="Installer l'application sur votre téléphone Android ou iPhone"
+        >
+          <Smartphone size={13} />
+          <span>App Mobile</span>
+        </button>
+
         <button
           id="btn-open-notifications"
           onClick={onOpenNotifications}
@@ -61,3 +72,4 @@ export const AppHeader: React.FC<Props> = ({
     </div>
   );
 };
+

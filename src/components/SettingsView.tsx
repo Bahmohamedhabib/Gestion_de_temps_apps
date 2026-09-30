@@ -6,6 +6,7 @@ import {
   Upload,
   CheckCircle2,
   Smartphone,
+  ExternalLink,
   Info,
   ShieldCheck,
   Sparkles,
@@ -629,21 +630,46 @@ export const SettingsView: React.FC<Props> = ({
       </div>
 
       {/* Mobile PWA Installation */}
-      <div className="bg-gradient-to-br from-indigo-900 via-indigo-950 to-neutral-900 text-white rounded-3xl p-5 shadow-sm space-y-3">
-        <div className="flex items-center gap-2">
-          <Smartphone size={18} className="text-indigo-400" />
-          <h3 className="text-sm font-bold">Installer comme Application Mobile</h3>
+      <div className="bg-gradient-to-br from-indigo-900 via-indigo-950 to-neutral-900 text-white rounded-3xl p-5 shadow-lg space-y-4 border border-indigo-700/50">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center text-white shadow-xs">
+              <Smartphone size={20} />
+            </div>
+            <div>
+              <h3 className="text-sm font-bold flex items-center gap-2">
+                <span>Application Mobile Réelle</span>
+                <span className="px-2 py-0.5 text-[9px] bg-emerald-500/20 text-emerald-300 font-bold uppercase rounded-full">
+                  Android & iOS
+                </span>
+              </h3>
+              <p className="text-[11px] text-indigo-200">
+                Plein écran • Alarmes en veille • Push système
+              </p>
+            </div>
+          </div>
         </div>
+
         <p className="text-xs text-neutral-300 leading-relaxed">
-          Ajoutez cette application à l'écran d'accueil de votre téléphone (iOS ou Android) pour un accès plein écran sans barre d'adresse et une gestion optimale des réveils.
+          Sur smartphone Android ou iPhone, installez l'application pour qu'elle s'exécute comme une véritable application native : vos tâches sonneront et vibreront à l'heure exacte, même écran verrouillé et téléphone en poche !
         </p>
-        <button
-          onClick={onOpenInstallModal}
-          className="w-full py-2.5 bg-white text-neutral-900 hover:bg-neutral-100 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
-        >
-          <Smartphone size={14} className="text-indigo-600" />
-          <span>Voir les instructions d'installation mobile</span>
-        </button>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <button
+            onClick={onOpenInstallModal}
+            className="py-2.5 px-4 bg-white text-neutral-900 hover:bg-neutral-100 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md"
+          >
+            <Smartphone size={15} className="text-indigo-600" />
+            <span>Installer sur mon téléphone</span>
+          </button>
+          <button
+            onClick={() => window.open(window.location.origin, '_blank')}
+            className="py-2.5 px-4 bg-indigo-800/80 hover:bg-indigo-700 text-white rounded-2xl text-xs font-bold flex items-center justify-center gap-2 border border-indigo-600 transition-all cursor-pointer"
+          >
+            <ExternalLink size={14} />
+            <span>Ouvrir dans Chrome / Safari</span>
+          </button>
+        </div>
       </div>
 
       {/* Data Management Section */}

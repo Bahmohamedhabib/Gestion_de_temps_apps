@@ -669,6 +669,7 @@ export default function App() {
           unreadNotifsCount={unreadNotifsCount}
           onOpenNotifications={() => setIsNotifsDrawerOpen(true)}
           onOpenUserMenu={() => setIsUserMenuOpen(true)}
+          onOpenInstallModal={() => setIsInstallModalOpen(true)}
         />
 
         {/* Floating Notification Banner Alert */}
@@ -699,6 +700,7 @@ export default function App() {
                   setEditingTask(null);
                   setIsCreateModalOpen(true);
                 }}
+                onOpenInstallModal={() => setIsInstallModalOpen(true)}
               />
             </motion.div>
           )}

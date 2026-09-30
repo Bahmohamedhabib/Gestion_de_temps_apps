@@ -1,13 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { BellRing, CheckCircle2, AlertTriangle, Send, Sparkles } from 'lucide-react';
-import { requestNotificationPermission, sendBrowserNotification, subscribeToWebPush, triggerServerTestPush } from '../utils/reminderEngine';
+import { BellRing, CheckCircle2, AlertTriangle, Send, Smartphone, ExternalLink, QrCode } from 'lucide-react';
+import { requestNotificationPermission, subscribeToWebPush, triggerServerTestPush } from '../utils/reminderEngine';
 
 interface Props {
   onPermissionChanged?: (permission: NotificationPermission) => void;
   userId?: string;
+  onOpenInstallModal?: () => void;
 }
 
-export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged, userId }) => {
+export const PhoneNotificationBanner: React.FC<Props> = ({
+  onPermissionChanged,
+  userId,
+  onOpenInstallModal,
+}) => {
   const [permission, setPermission] = useState<NotificationPermission>(() => {
     return typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'default';
   });
@@ -15,8 +20,22 @@ export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged, 
   const [isActivating, setIsActivating] = useState(false);
   const [isTestingPush, setIsTestingPush] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [isInIframe, setIsInIframe] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
 
   useEffect(() => {
+    try {
+      setIsInIframe(window.self !== window.top);
+    } catch {
+      setIsInIframe(true);
+    }
+
+    const standalone =
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as unknown as { standalone?: boolean }).standalone === true ||
+      document.referrer.includes('android-app://');
+    setIsStandalone(standalone);
+
     if (typeof window !== 'undefined' && 'Notification' in window) {
       setPermission(Notification.permission);
     }
@@ -31,13 +50,9 @@ export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged, 
       if (onPermissionChanged) onPermissionChanged(result);
 
       if (result === 'granted') {
-        // Register Web Push subscription with server
         await subscribeToWebPush(userId);
-
         setShowSuccess(true);
-        // Dispatch test confirmation notification from server
         await triggerServerTestPush(userId);
-
         setTimeout(() => setShowSuccess(false), 8000);
       }
     } catch (e) {
@@ -51,17 +66,69 @@ export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged, 
     setIsTestingPush(true);
     setTestResult(null);
     try {
-      // Ensure subscribed
       await subscribeToWebPush(userId);
       const res = await triggerServerTestPush(userId);
       setTestResult(res.message);
       setTimeout(() => setTestResult(null), 6000);
-    } catch (err: any) {
+    } catch {
       setTestResult('Erreur de test');
     } finally {
       setIsTestingPush(false);
     }
   };
+
+  const handleOpenDirect = () => {
+    window.open(window.location.origin, '_blank');
+  };
+
+  // If in iframe (AI Studio preview), show clear guidance to open on real phone or outside iframe
+  if (isInIframe && !isStandalone) {
+    return (
+      <div className="relative overflow-hidden rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50/90 via-purple-50/90 to-pink-50/80 dark:from-neutral-900 dark:via-neutral-900 dark:to-neutral-900 p-4 shadow-sm mb-3">
+        <div className="flex items-start gap-3">
+          <div className="w-10 h-10 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm mt-0.5">
+            <Smartphone size={20} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="px-1.5 py-0.5 rounded bg-indigo-600 text-white text-[9px] font-black uppercase tracking-wider">
+                Application Mobile Réelle
+              </span>
+              <span className="text-[10px] font-semibold text-indigo-700 dark:text-indigo-400">
+                Android & iPhone
+              </span>
+            </div>
+            <h4 className="text-xs font-extrabold text-neutral-900 dark:text-white mt-1">
+              Pour faire sonner le téléphone en veille, passez en application réelle !
+            </h4>
+            <p className="text-[11px] text-neutral-600 dark:text-neutral-400 mt-0.5 leading-relaxed">
+              Dans cette fenêtre d'aperçu web, le navigateur bloque la sonnerie en veille et les notifications Push. En installant l'application sur votre smartphone, votre téléphone sonnera et vibrera comme un vrai réveil à l'heure exacte.
+            </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {onOpenInstallModal && (
+                <button
+                  type="button"
+                  onClick={onOpenInstallModal}
+                  className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Smartphone size={13} />
+                  <span>Installer sur mon smartphone (QR Code / Guide)</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleOpenDirect}
+                className="px-3 py-2 bg-white dark:bg-neutral-800 hover:bg-neutral-100 dark:hover:bg-neutral-700 text-neutral-800 dark:text-neutral-200 text-xs font-bold rounded-xl border border-neutral-200 dark:border-neutral-700 transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <ExternalLink size={13} />
+                <span>Ouvrir en plein écran</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // If already granted and not testing, show a compact reassurance badge with test button
   if (permission === 'granted' && !showSuccess) {
@@ -71,19 +138,31 @@ export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged, 
           <div className="w-6 h-6 rounded-lg bg-emerald-500 text-white flex items-center justify-center shrink-0">
             <CheckCircle2 size={14} />
           </div>
-          <span className="font-semibold text-[11px] text-emerald-900">
-            Notifications en veille actives (Web Push)
+          <span className="font-semibold text-[11px] text-emerald-900 dark:text-emerald-300">
+            Notifications en veille actives (Push & Alarme)
           </span>
         </div>
-        <button
-          type="button"
-          onClick={handleTestLockscreenPush}
-          disabled={isTestingPush}
-          className="px-2.5 py-1 bg-white hover:bg-emerald-50 active:scale-95 text-emerald-700 font-bold text-[10px] rounded-lg border border-emerald-200 shadow-2xs transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
-        >
-          <Send size={10} />
-          <span>{isTestingPush ? 'Envoi...' : testResult || 'Tester sur mon tél'}</span>
-        </button>
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={handleTestLockscreenPush}
+            disabled={isTestingPush}
+            className="px-2.5 py-1 bg-white hover:bg-emerald-50 active:scale-95 text-emerald-700 font-bold text-[10px] rounded-lg border border-emerald-200 shadow-2xs transition-all flex items-center gap-1 cursor-pointer disabled:opacity-50"
+          >
+            <Send size={10} />
+            <span>{isTestingPush ? 'Envoi...' : testResult || 'Tester sur mon tél'}</span>
+          </button>
+          {!isStandalone && onOpenInstallModal && (
+            <button
+              type="button"
+              onClick={onOpenInstallModal}
+              className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] rounded-lg shadow-2xs transition-all flex items-center gap-1 cursor-pointer"
+            >
+              <Smartphone size={10} />
+              <span>Installer</span>
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -114,11 +193,21 @@ export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged, 
           </div>
           <div className="flex-1 min-w-0">
             <h4 className="text-xs font-black text-amber-950">
-              Notifications bloquées sur ce téléphone
+              Notifications bloquées sur ce navigateur
             </h4>
             <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
-              Pour que le téléphone sonne en veille, autorisez les notifications : appuyez sur l'icône de cadenas ou paramètres 🔒 à gauche de l'adresse web dans votre navigateur, puis réglez <strong>Notifications sur « Autoriser »</strong>.
+              Pour que le téléphone sonne en veille, autorisez les notifications : appuyez sur l'icône de cadenas ou paramètres 🔒 à gauche de l'adresse web dans Chrome, puis réglez <strong>Notifications sur « Autoriser »</strong>.
             </p>
+            {onOpenInstallModal && (
+              <button
+                type="button"
+                onClick={onOpenInstallModal}
+                className="mt-2.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold rounded-xl shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Smartphone size={13} />
+                <span>Installer l'Application Mobile Réelle</span>
+              </button>
+            )}
           </div>
         </div>
       ) : (
@@ -133,7 +222,7 @@ export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged, 
                   Essentiel
                 </span>
                 <span className="text-[10px] font-semibold text-indigo-700">
-                  Comme Facebook, Instagram ou Snap
+                  Comme WhatsApp, Instagram ou Réveil
                 </span>
               </div>
               <h4 className="text-xs font-extrabold text-neutral-900 mt-1">
@@ -142,7 +231,7 @@ export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged, 
               <p className="text-[11px] text-neutral-600 mt-0.5 leading-relaxed">
                 Autorisez les notifications pour recevoir les alertes sur l'écran verrouillé et faire sonner votre téléphone à l'heure exacte de chaque tâche, même application fermée.
               </p>
-              <div className="mt-3 flex items-center gap-2">
+              <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={handleEnableNotifications}
@@ -150,8 +239,18 @@ export const PhoneNotificationBanner: React.FC<Props> = ({ onPermissionChanged, 
                   className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
                   <BellRing size={13} />
-                  <span>{isActivating ? 'Activation...' : 'Activer les notifications du téléphone'}</span>
+                  <span>{isActivating ? 'Activation...' : 'Activer les notifications'}</span>
                 </button>
+                {onOpenInstallModal && (
+                  <button
+                    type="button"
+                    onClick={onOpenInstallModal}
+                    className="px-3.5 py-2 bg-white dark:bg-neutral-800 hover:bg-neutral-50 text-neutral-800 dark:text-neutral-200 text-xs font-bold rounded-xl border border-neutral-300 dark:border-neutral-700 shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Smartphone size={13} />
+                    <span>Installer sur Smartphone</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
